@@ -11,7 +11,7 @@ class Machine extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'type', 'open_mm', 'screw_diameter_cm', 'description', 'status'];
+    protected $fillable = ['name', 'type', 'open_mm', 'screw_diameter_cm', 'description', 'status', 'problem_description'];
 
     public function maintenances(): HasMany
     {

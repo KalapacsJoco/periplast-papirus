@@ -27,12 +27,18 @@ class MachineForm
                     ->columnSpanFull(),
                 Select::make('status')
                     ->options([
-                        'active' => 'Active',
-                        'inactive' => 'Inactive',
-                        'maintenance' => 'In Maintenance',
+                        'active' => 'Active (Working on order)',
+                        'stopped' => 'Stopped (Order expired/other)',
+                        'warning' => 'Warning (Maintenance needed soon)',
+                        'broken' => 'Broken (Not operational)',
                     ])
                     ->required()
                     ->default('active'),
+                Textarea::make('problem_description')
+                    ->label('Problem Description')
+                    ->placeholder('Describe the issue or maintenance needed...')
+                    ->columnSpanFull()
+                    ->visible(fn ($get) => in_array($get('status'), ['warning', 'broken'])),
             ]);
     }
 }

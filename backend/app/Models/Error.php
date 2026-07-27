@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Error extends Model
 {
-    protected $fillable = ['machine_id', 'date', 'type', 'severity', 'description', 'solution', 'status'];
+    protected $fillable = ['machine_id', 'date', 'type', 'severity', 'description', 'solution', 'status', 'restored_at'];
 
     public function machine(): BelongsTo
     {
