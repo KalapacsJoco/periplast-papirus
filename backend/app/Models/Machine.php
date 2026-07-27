@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Machine extends Model
 {
+    use HasFactory;
+
     protected $fillable = ['name', 'type', 'open_mm', 'screw_diameter_cm', 'description', 'status'];
 
     public function maintenances(): HasMany
