@@ -91,7 +91,6 @@ export default function App() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [ordersLoaded, setOrdersLoaded] = useState(false);
   const [productionDrafts, setProductionDrafts] = useState<Record<number, { cycle_time: string; quantity: string; current_quantity: string }>>({});
-  const [clockTick, setClockTick] = useState(0);
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -136,10 +135,6 @@ export default function App() {
     loadOrders();
   }, []);
 
-  useEffect(() => {
-    const timer = setInterval(() => setClockTick((current) => current + 1), 10000);
-    return () => clearInterval(timer);
-  }, []);
 
   const loadMachines = async () => {
     setIsLoading(true);
@@ -1468,6 +1463,82 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: 8,
     fontStyle: 'italic',
+  },
+  progressGroup: {
+    marginTop: 14,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  progressLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
+    marginBottom: 6,
+  },
+  progressBarOuter: {
+    width: '100%',
+    height: 16,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 999,
+    overflow: 'hidden',
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  progressBarInner: {
+    height: '100%',
+    borderRadius: 999,
+    minWidth: 4,
+  },
+  progressText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 8,
+    textAlign: 'right',
+  },
+  delayText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#b91c1c',
+    marginTop: 8,
+  },
+  productionInputsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  productionInputBlock: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 96,
+  },
+  productionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+    marginBottom: 4,
+  },
+  productionInput: {
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#ffffff',
+    fontSize: 14,
+    color: '#0f172a',
+  },
+  productionSaveButton: {
+    marginTop: 12,
+    flex: 0,
+    alignSelf: 'flex-start',
+    minWidth: 200,
+    backgroundColor: '#0f766e',
   },
   buttonGroup: {
     flexDirection: 'row',
