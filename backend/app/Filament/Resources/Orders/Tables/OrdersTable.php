@@ -14,18 +14,40 @@ class OrdersTable
     {
         return $table
             ->columns([
-                TextColumn::make('machine.name')
-                    ->searchable(),
-                TextColumn::make('date')
-                    ->date()
+                TextColumn::make('order_number')
+                    ->searchable()
                     ->sortable(),
-                TextColumn::make('customer')
-                    ->searchable(),
-                TextColumn::make('quantity')
+                TextColumn::make('machine.name')
+                    ->searchable()
+                    ->sortable(),
+                TextColumn::make('mould.name')
+                    ->searchable()
+                    ->sortable(),
+                TextColumn::make('product.name')
+                    ->searchable()
+                    ->sortable(),
+                TextColumn::make('cycle_time')
+                    ->label('Cycle (ms)')
                     ->numeric()
                     ->sortable(),
+                TextColumn::make('net_weight')
+                    ->label('Net Weight (g)')
+                    ->numeric(decimalPlaces: 3)
+                    ->sortable(),
+                TextColumn::make('gross_weight')
+                    ->label('Gross Weight (g)')
+                    ->numeric(decimalPlaces: 3)
+                    ->sortable(),
                 TextColumn::make('status')
-                    ->searchable(),
+                    ->searchable()
+                    ->sortable()
+                    ->badge()
+                    ->colors([
+                        'warning' => 'waiting',
+                        'info' => 'in_progress',
+                        'danger' => 'paused',
+                        'success' => 'completed',
+                    ]),
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
@@ -48,3 +70,4 @@ class OrdersTable
             ]);
     }
 }
+

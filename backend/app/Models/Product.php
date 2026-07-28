@@ -50,4 +50,9 @@ class Product extends Model
     {
         return $this->hasMany(Insert::class);
     }
+
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
+    }
 }

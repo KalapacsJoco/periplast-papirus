@@ -2,6 +2,7 @@
 
 use App\Models\Machine;
 use App\Models\Mould;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\Error;
 use Illuminate\Support\Facades\Route;
@@ -104,4 +105,83 @@ Route::get('/products', function () {
         ])
         ->orderBy('name')
         ->get();
+});
+
+// ── Orders ───────────────────────────────────────────────────────────────────
+
+Route::get('/orders', function () {
+    return Order::query()
+        ->select(['id', 'order_number', 'machine_id', 'mould_id', 'product_id', 'date', 'customer', 'quantity', 'current_quantity', 'started_at', 'cycle_time', 'net_weight', 'gross_weight', 'color_percentage', 'status', 'created_at'])
+        ->with([
+            'machine:id,name,status,problem_description',
+            'mould:id,name,number,cavity_count,status,problem_description',
+            'product:id,name,code,is_active',
+        ])
+        ->orderBy('order_number')
+        ->get();
+});
+
+Route::post('/orders/{id}/status', function (Illuminate\Http\Request $request, $id) {
+    $validated = $request->validate([
+        'status' => 'required|in:waiting,in_progress,paused,completed',
+        'pause_description' => 'nullable|string',
+    ]);
+
+    $order = Order::findOrFail($id);
+    $status = $validated['status'];
+    $pauseDescription = $status === 'paused'
+        ? ($validated['pause_description'] ?? null)
+        : null;
+
+    $order->update([
+        'status' => $status,
+        'pause_description' => $pauseDescription,
+        'started_at' => $status === 'in_progress' && ! $order->started_at ? now() : $order->started_at,
+    ]);
+
+    return $order->load(['machine:id,name', 'mould:id,name,number', 'product:id,name,code']);
+});
+
+Route::post('/orders/{id}/production-data', function (Illuminate\Http\Request $request, $id) {
+    $validated = $request->validate([
+        'cycle_time' => 'required|integer|min:1',
+        'quantity' => 'required|integer|min:1',
+        'current_quantity' => 'required|integer|min:0',
+    ]);
+
+    $order = Order::findOrFail($id);
+    $currentQuantity = min($validated['current_quantity'], $validated['quantity']);
+
+    $order->update([
+        'cycle_time' => $validated['cycle_time'],
+        'quantity' => $validated['quantity'],
+        'current_quantity' => $currentQuantity,
+        'started_at' => $order->started_at ?? now(),
+        'status' => $order->status === 'waiting' ? 'in_progress' : $order->status,
+    ]);
+
+    return $order->load([
+        'machine:id,name,status,problem_description',
+        'mould:id,name,number,cavity_count,status,problem_description',
+        'product:id,name,code,is_active',
+    ]);
+});
+
+Route::post('/products/{id}/status', function (Illuminate\Http\Request $request, $id) {
+    $validated = $request->validate([
+        'status' => 'required|in:active,inactive',
+    ]);
+
+    $product = Product::findOrFail($id);
+
+    $product->update([
+        'is_active' => $validated['status'] === 'active',
+    ]);
+
+    return $product->load([
+        'material:id,name,code',
+        'color:id,name,code',
+        'additives:id,name,code',
+        'moulds:id,name,number',
+    ]);
 });

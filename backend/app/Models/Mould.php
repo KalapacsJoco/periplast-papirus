@@ -47,8 +47,8 @@ class Mould extends Model
         return $this->hasMany(Insert::class);
     }
 
-    public function orders(): BelongsToMany
+    public function orders(): HasMany
     {
-        return $this->belongsToMany(Order::class);
+        return $this->hasMany(Order::class);
     }
 }
