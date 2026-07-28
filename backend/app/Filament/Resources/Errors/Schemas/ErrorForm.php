@@ -16,7 +16,14 @@ class ErrorForm
             ->components([
                 Select::make('machine_id')
                     ->relationship('machine', 'name')
-                    ->required(),
+                    ->searchable()
+                    ->preload()
+                    ->rules(['required_without:mould_id']),
+                Select::make('mould_id')
+                    ->relationship('mould', 'name')
+                    ->searchable()
+                    ->preload()
+                    ->rules(['required_without:machine_id']),
                 DatePicker::make('date')
                     ->required(),
                 TextInput::make('type')

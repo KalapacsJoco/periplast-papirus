@@ -7,10 +7,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Error extends Model
 {
-    protected $fillable = ['machine_id', 'date', 'type', 'severity', 'description', 'solution', 'status', 'restored_at'];
+    protected $fillable = ['machine_id', 'mould_id', 'date', 'type', 'severity', 'description', 'solution', 'status', 'restored_at'];
 
     public function machine(): BelongsTo
     {
         return $this->belongsTo(Machine::class);
+    }
+
+    public function mould(): BelongsTo
+    {
+        return $this->belongsTo(Mould::class);
     }
 }

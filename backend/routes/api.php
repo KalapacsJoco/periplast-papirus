@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Machine;
+use App\Models\Mould;
 use App\Models\Error;
 use Illuminate\Support\Facades\Route;
 
@@ -59,3 +60,32 @@ Route::post('/machines/{id}/restore', function ($id) {
     return $machine;
 });
 
+// ── Moulds ───────────────────────────────────────────────────────────────────
+
+Route::get('/moulds', function () {
+    return Mould::query()
+        ->select(['id', 'name', 'type', 'number', 'cavity_count', 'open_mm', 'status', 'problem_description'])
+        ->with(['product:id,name'])
+        ->orderBy('name')
+        ->get();
+});
+
+Route::post('/moulds/{id}/status', function (Illuminate\Http\Request $request, $id) {
+    $validated = $request->validate([
+        'status' => 'required|in:active,standby,warning,needs_repair,under_repair',
+        'problem_description' => 'nullable|string',
+    ]);
+
+    $mould = Mould::findOrFail($id);
+    $status = $validated['status'];
+    $problemDescription = in_array($status, ['warning', 'needs_repair'], true)
+        ? ($validated['problem_description'] ?? null)
+        : null;
+
+    $mould->update([
+        'status' => $status,
+        'problem_description' => $problemDescription,
+    ]);
+
+    return $mould->load('product:id,name');
+});
