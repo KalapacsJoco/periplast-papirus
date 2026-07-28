@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Product extends Model
@@ -13,6 +15,9 @@ class Product extends Model
     protected $fillable = [
         'name',
         'code',
+        'customer_code',
+        'material_id',
+        'color_id',
         'description',
         'is_active',
     ];
@@ -21,9 +26,24 @@ class Product extends Model
         'is_active' => 'boolean',
     ];
 
-    public function moulds(): HasMany
+    public function material(): BelongsTo
     {
-        return $this->hasMany(Mould::class);
+        return $this->belongsTo(Material::class);
+    }
+
+    public function color(): BelongsTo
+    {
+        return $this->belongsTo(Color::class);
+    }
+
+    public function moulds(): BelongsToMany
+    {
+        return $this->belongsToMany(Mould::class);
+    }
+
+    public function additives(): BelongsToMany
+    {
+        return $this->belongsToMany(Additive::class);
     }
 
     public function inserts(): HasMany

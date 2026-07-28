@@ -19,7 +19,7 @@ class InsertForm
                     ->preload()
                     ->required(),
                 Select::make('product_id')
-                    ->relationship('product', 'name')
+                    ->relationship('product', 'code')
                     ->searchable()
                     ->preload()
                     ->required(),

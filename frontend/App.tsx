@@ -40,7 +40,17 @@ type Mould = {
   product?: { id: number; name: string };
 };
 
-type Screen = 'home' | 'machines' | 'moulds';
+type Product = {
+  id: number;
+  name: string;
+  code: string;
+  material?: { id: number; name: string; code: string };
+  color?: { id: number; name: string; code: string };
+  additives?: Array<{ id: number; name: string; code: string }>;
+  moulds?: Array<{ id: number; name: string; number: string }>;
+};
+
+type Screen = 'home' | 'machines' | 'moulds' | 'products';
 
 export default function App() {
   const { t, i18n } = useTranslation();
@@ -65,6 +75,12 @@ export default function App() {
   const [newMouldStatus, setNewMouldStatus] = useState<string>('');
   const [mouldProblemDescription, setMouldProblemDescription] = useState<string>('');
   const [isMouldUpdating, setIsMouldUpdating] = useState(false);
+
+  // Products state
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isProductsLoading, setIsProductsLoading] = useState(false);
+  const [productsError, setProductsError] = useState<string | null>(null);
+  const [productsLoaded, setProductsLoaded] = useState(false);
 
   const apiBaseUrl = useMemo(() => {
     const overrideUrl = process.env.EXPO_PUBLIC_API_URL;
@@ -170,6 +186,24 @@ export default function App() {
       setMouldsError(error instanceof Error ? error.message : t('unknown_error'));
     } finally {
       setIsMouldsLoading(false);
+    }
+  };
+
+  const loadProducts = async () => {
+    setIsProductsLoading(true);
+    setProductsError(null);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/products`);
+      if (!response.ok) throw new Error(`${t('api_error')}: ${response.status}`);
+
+      const data = (await response.json()) as Product[];
+      setProducts(data);
+      setProductsLoaded(true);
+    } catch (error) {
+      setProductsError(error instanceof Error ? error.message : t('unknown_error'));
+    } finally {
+      setIsProductsLoading(false);
     }
   };
 
@@ -309,6 +343,16 @@ export default function App() {
         <Text style={styles.homeButtonText}>{t('moulds_button_label')}</Text>
       </Pressable>
 
+      <Pressable
+        style={styles.homeButton}
+        onPress={() => {
+          setCurrentScreen('products');
+          loadProducts();
+        }}
+      >
+        <Text style={styles.homeButtonText}>{t('products_button_label')}</Text>
+      </Pressable>
+
       <View style={styles.homeInfo}>
         <Text style={styles.homeInfoTitle}>Papirus</Text>
         <Text style={styles.homeInfoText}>
@@ -428,6 +472,55 @@ export default function App() {
     </View>
   );
 
+  const ProductsScreen = () => (
+    <View style={styles.container}>
+      {isProductsLoading && !productsLoaded && <ActivityIndicator size="large" color="#0f766e" />}
+
+      {productsError ? <Text style={styles.errorText}>{productsError}</Text> : null}
+
+      {productsLoaded && !isProductsLoading && products.length === 0 ? (
+        <Text style={styles.emptyText}>{t('no_products')}</Text>
+      ) : null}
+
+      <FlatList
+        data={products}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item }) => (
+          <View style={styles.machineCard}>
+            <View style={styles.machineHeader}>
+              <Text style={styles.machineName}>{item.name}</Text>
+            </View>
+
+            <Text style={styles.machineMeta}>
+              {t('product_code')}: {item.code}
+            </Text>
+
+            <Text style={styles.machineMeta}>
+              {t('material')}: {item.material ? `${item.material.name} (${item.material.code})` : '-'}
+            </Text>
+
+            <Text style={styles.machineMeta}>
+              {t('color')}: {item.color ? `${item.color.name} (${item.color.code})` : '-'}
+            </Text>
+
+            <Text style={styles.machineMeta}>
+              {t('additives')}: {item.additives && item.additives.length > 0
+                ? item.additives.map(a => `${a.name} (${a.code})`).join(', ')
+                : '-'}
+            </Text>
+
+            <Text style={styles.machineMeta}>
+              {t('compatible_moulds')}: {item.moulds && item.moulds.length > 0
+                ? item.moulds.map(m => `${m.name} (${m.number})`).join(', ')
+                : '-'}
+            </Text>
+          </View>
+        )}
+        contentContainerStyle={styles.listContent}
+      />
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <Navbar />
@@ -435,6 +528,7 @@ export default function App() {
       {currentScreen === 'home' && <HomeScreen />}
       {currentScreen === 'machines' && <MachinesScreen />}
       {currentScreen === 'moulds' && <MouldsScreen />}
+      {currentScreen === 'products' && <ProductsScreen />}
 
       <Modal visible={showModal} animationType="slide" transparent={true}>
         <SafeAreaView style={styles.modalContainer}>

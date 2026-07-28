@@ -20,6 +20,9 @@ class InsertsTable
                 TextColumn::make('product.name')
                     ->label('Product')
                     ->searchable(),
+                TextColumn::make('product.code')
+                    ->label('Product cikkszam')
+                    ->searchable(),
                 TextColumn::make('name')
                     ->searchable(),
                 TextColumn::make('number')

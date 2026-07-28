@@ -2,6 +2,7 @@
 
 use App\Models\Machine;
 use App\Models\Mould;
+use App\Models\Product;
 use App\Models\Error;
 use Illuminate\Support\Facades\Route;
 
@@ -65,7 +66,7 @@ Route::post('/machines/{id}/restore', function ($id) {
 Route::get('/moulds', function () {
     return Mould::query()
         ->select(['id', 'name', 'type', 'number', 'cavity_count', 'open_mm', 'status', 'problem_description'])
-        ->with(['product:id,name'])
+    ->with(['products:id,name,code'])
         ->orderBy('name')
         ->get();
 });
@@ -87,5 +88,20 @@ Route::post('/moulds/{id}/status', function (Illuminate\Http\Request $request, $
         'problem_description' => $problemDescription,
     ]);
 
-    return $mould->load('product:id,name');
+    return $mould->load('products:id,name,code');
+});
+
+// ── Products ─────────────────────────────────────────────────────────────────
+
+Route::get('/products', function () {
+    return Product::query()
+        ->select(['id', 'name', 'code', 'material_id', 'color_id'])
+        ->with([
+            'material:id,name,code',
+            'color:id,name,code',
+            'additives:id,name,code',
+            'moulds:id,name,number',
+        ])
+        ->orderBy('name')
+        ->get();
 });

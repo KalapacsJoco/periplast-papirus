@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Models\Mould;
 use App\Models\Product;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Collection;
 
 /**
  * @extends Factory<Mould>
@@ -42,7 +43,6 @@ class MouldFactory extends Factory
         $type     = fake()->randomElement(self::TYPES);
 
         return [
-            'product_id'   => Product::inRandomOrder()->first()?->id ?? Product::factory(),
             'name'         => sprintf('%s %d-fészkes szerszám', $mouldNo, $cavities),
             'type'         => $type,
             'number'       => $mouldNo,
@@ -60,5 +60,17 @@ class MouldFactory extends Factory
                 'under_repair',
             ]),
         ];
+    }
+
+    public function configure(): static
+    {
+        return $this->afterCreating(function (Mould $mould): void {
+            /** @var Collection<int, Product> $products */
+            $products = Product::query()->inRandomOrder()->limit(rand(1, 2))->get();
+
+            if ($products->isNotEmpty()) {
+                $mould->products()->syncWithoutDetaching($products->pluck('id')->all());
+            }
+        });
     }
 }

@@ -19,7 +19,23 @@ class ProductsTable
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('code')
+                    ->label('Cikkszam')
                     ->searchable(),
+                TextColumn::make('material.name')
+                    ->label('Anyag')
+                    ->searchable(),
+                TextColumn::make('color.name')
+                    ->label('Szin')
+                    ->searchable(),
+                TextColumn::make('additives.name')
+                    ->label('Adalekanyagok')
+                    ->listWithLineBreaks()
+                    ->limitList(3)
+                    ->searchable(),
+                TextColumn::make('moulds_count')
+                    ->label('Kompatibilis szerszamok')
+                    ->counts('moulds')
+                    ->sortable(),
                 IconColumn::make('is_active')
                     ->boolean(),
                 TextColumn::make('created_at')
