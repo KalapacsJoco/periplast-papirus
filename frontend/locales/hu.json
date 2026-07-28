@@ -44,6 +44,7 @@
   "issue_target": "Mire vonatkozzon",
   "current_order": "Jelenlegi megrendelő",
   "order_number": "Megrendelő szám",
+  "started_at": "Kezdés dátuma",
   "mould": "Szerszám",
   "cycle_time_seconds": "Ciklusidő (s)",
   "total_quantity": "Teljes mennyiség",

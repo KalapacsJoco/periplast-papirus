@@ -44,6 +44,7 @@
   "issue_target": "Worauf anwenden",
   "current_order": "Aktueller Auftrag",
   "order_number": "Auftragsnummer",
+  "started_at": "Startdatum",
   "mould": "Werkzeug",
   "cycle_time_seconds": "Zykluszeit (s)",
   "total_quantity": "Gesamtmenge",

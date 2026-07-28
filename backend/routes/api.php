@@ -111,7 +111,7 @@ Route::get('/products', function () {
 
 Route::get('/orders', function () {
     return Order::query()
-        ->select(['id', 'order_number', 'machine_id', 'mould_id', 'product_id', 'date', 'customer', 'quantity', 'current_quantity', 'started_at', 'cycle_time', 'net_weight', 'gross_weight', 'color_percentage', 'status', 'created_at'])
+        ->select(['id', 'order_number', 'machine_id', 'mould_id', 'product_id', 'date', 'customer', 'quantity', 'current_quantity', 'started_at', 'ended_at', 'cycle_time', 'net_weight', 'gross_weight', 'color_percentage', 'status', 'created_at'])
         ->with([
             'machine:id,name,status,problem_description',
             'mould:id,name,number,cavity_count,status,problem_description',
@@ -133,10 +133,24 @@ Route::post('/orders/{id}/status', function (Illuminate\Http\Request $request, $
         ? ($validated['pause_description'] ?? null)
         : null;
 
+    $startedAt = $order->started_at;
+    $endedAt = $order->ended_at;
+
+    if ($status === 'in_progress' && ! $startedAt) {
+        $startedAt = now();
+    }
+
+    if ($status === 'completed') {
+        $endedAt = now();
+    } elseif ($status !== 'completed') {
+        $endedAt = null;
+    }
+
     $order->update([
         'status' => $status,
         'pause_description' => $pauseDescription,
-        'started_at' => $status === 'in_progress' && ! $order->started_at ? now() : $order->started_at,
+        'started_at' => $startedAt,
+        'ended_at' => $endedAt,
     ]);
 
     return $order->load(['machine:id,name', 'mould:id,name,number', 'product:id,name,code']);
@@ -151,13 +165,15 @@ Route::post('/orders/{id}/production-data', function (Illuminate\Http\Request $r
 
     $order = Order::findOrFail($id);
     $currentQuantity = min($validated['current_quantity'], $validated['quantity']);
+    $willBeCompleted = $currentQuantity >= $validated['quantity'];
 
     $order->update([
         'cycle_time' => $validated['cycle_time'],
         'quantity' => $validated['quantity'],
         'current_quantity' => $currentQuantity,
         'started_at' => $order->started_at ?? now(),
-        'status' => $order->status === 'waiting' ? 'in_progress' : $order->status,
+        'status' => $willBeCompleted ? 'completed' : ($order->status === 'waiting' ? 'in_progress' : $order->status),
+        'ended_at' => $willBeCompleted ? ($order->ended_at ?? now()) : null,
     ]);
 
     return $order->load([

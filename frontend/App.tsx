@@ -166,18 +166,21 @@ export default function App() {
 
       const data = (await response.json()) as Order[];
       setOrders(data);
-      setProductionDrafts(
-        Object.fromEntries(
-          data.map((order) => [
-            order.id,
-            {
+      setProductionDrafts((current) => {
+        const next = { ...current };
+
+        data.forEach((order) => {
+          if (!next[order.id]) {
+            next[order.id] = {
               cycle_time: String(order.cycle_time ?? ''),
               quantity: String(order.quantity ?? ''),
               current_quantity: String(order.current_quantity ?? 0),
-            },
-          ])
-        )
-      );
+            };
+          }
+        });
+
+        return next;
+      });
       setOrdersLoaded(true);
     } catch (error) {
       setOrdersError(
@@ -550,14 +553,23 @@ export default function App() {
     }
   };
 
-  const getOrderTracking = (order: Order) => {
+  const getOrderTracking = (
+    order: Order,
+    draft?: { cycle_time: string; quantity: string; current_quantity: string }
+  ) => {
     const startedAt = order.started_at ? new Date(order.started_at) : null;
     const mouldCount = order.mould?.cavity_count ?? 1;
-    const totalPieces = Math.max(1, Number(order.quantity ?? 0));
+    const draftQuantity = Number(draft?.quantity ?? order.quantity ?? 0);
+    const draftCycleTime = Number(draft?.cycle_time ?? order.cycle_time ?? 0);
+    const draftCurrentQuantity = Number(draft?.current_quantity ?? order.current_quantity ?? 0);
+    const totalPieces = Math.max(1, Number.isFinite(draftQuantity) ? draftQuantity : Number(order.quantity ?? 0));
     const totalCycles = Math.max(1, Math.ceil(totalPieces / Math.max(1, mouldCount)));
-    const cycleTime = Math.max(1, Number(order.cycle_time ?? 0));
+    const cycleTime = Math.max(1, Number.isFinite(draftCycleTime) ? draftCycleTime : Number(order.cycle_time ?? 0));
     const totalSeconds = totalCycles * cycleTime;
-    const currentPieces = Math.max(0, Number(order.current_quantity ?? 0));
+    const currentPiecesRaw = Number.isFinite(draftCurrentQuantity)
+      ? draftCurrentQuantity
+      : Number(order.current_quantity ?? 0);
+    const currentPieces = Math.max(0, Math.min(totalPieces, currentPiecesRaw));
     const remainingPieces = Math.max(0, totalPieces - currentPieces);
     const remainingCycles = Math.max(0, Math.ceil(remainingPieces / Math.max(1, mouldCount)));
     const remainingSeconds = remainingCycles * cycleTime;
@@ -590,13 +602,6 @@ export default function App() {
   const formatEta = (date: Date | null) => {
     if (!date) return '-';
     return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-  };
-
-  const getProgressBarColor = (value: number) => {
-    if (value >= 0.85) return '#22c55e';
-    if (value >= 0.5) return '#0f766e';
-    if (value >= 0.2) return '#f59e0b';
-    return '#ef4444';
   };
 
   const percentWidth = (value: number) => {
@@ -801,7 +806,7 @@ export default function App() {
     </View>
   );
 
-  const MachinesScreen = () => (
+  const renderMachinesScreen = () => (
     <View style={styles.container}>
       {(isLoading || isOrdersLoading) && !hasLoaded && !ordersLoaded && <ActivityIndicator size="large" color="#0f766e" />}
 
@@ -847,6 +852,9 @@ export default function App() {
                   {t('order_number')}: {item.currentOrder.order_number}
                 </Text>
                 <Text style={styles.machineMeta}>
+                  {t('started_at')}: {formatEta(item.currentOrder.started_at ? new Date(item.currentOrder.started_at) : null)}
+                </Text>
+                <Text style={styles.machineMeta}>
                   {t('product')}: {item.currentOrder.product?.name ?? '-'}
                 </Text>
                 <Text style={styles.machineMeta}>
@@ -860,8 +868,8 @@ export default function App() {
                 </Text>
 
                 {(() => {
-                  const tracking = getOrderTracking(item.currentOrder);
                   const draft = getProductionDraft(item.currentOrder);
+                  const tracking = getOrderTracking(item.currentOrder, draft);
 
                   return (
                     <>
@@ -903,17 +911,31 @@ export default function App() {
                       </Pressable>
 
                       <View style={styles.progressGroup}>
-                        <Text style={styles.progressLabel}>{t('theoretical_progress')}</Text>
+                        <Text style={styles.progressLabel}>{t('theoretical_progress')} + {t('actual_progress')}</Text>
                         <View style={styles.progressBarOuter}>
-                          <View style={[styles.progressBarInner, { width: percentWidth(tracking.theoreticalProgress), backgroundColor: getProgressBarColor(tracking.theoreticalProgress) }]} />
+                          <View
+                            style={[
+                              styles.progressBarInner,
+                              styles.progressBarTheoretical,
+                              { width: percentWidth(tracking.theoreticalProgress) },
+                            ]}
+                          />
+                          <View
+                            style={[
+                              styles.progressBarInner,
+                              styles.progressBarActual,
+                              { width: percentWidth(tracking.actualProgress) },
+                            ]}
+                          />
                         </View>
-                        <Text style={styles.progressText}>{Math.round(tracking.theoreticalProgress * 100)}%</Text>
-
-                        <Text style={styles.progressLabel}>{t('actual_progress')}</Text>
-                        <View style={styles.progressBarOuter}>
-                          <View style={[styles.progressBarInner, { width: percentWidth(tracking.actualProgress), backgroundColor: getProgressBarColor(tracking.actualProgress) }]} />
+                        <View style={styles.progressLegendRow}>
+                          <Text style={styles.progressLegendItem}>
+                            <Text style={styles.progressLegendSwatchTheoretical}>■</Text> {t('theoretical_progress')}: {Math.round(tracking.theoreticalProgress * 100)}%
+                          </Text>
+                          <Text style={styles.progressLegendItem}>
+                            <Text style={styles.progressLegendSwatchActual}>■</Text> {t('actual_progress')}: {Math.round(tracking.actualProgress * 100)}%
+                          </Text>
                         </View>
-                        <Text style={styles.progressText}>{Math.round(tracking.actualProgress * 100)}%</Text>
 
                         <Text style={styles.delayText}>
                           {t('delay')}: {formatDuration(tracking.delaySeconds)}
@@ -945,7 +967,7 @@ export default function App() {
     </View>
   );
 
-  const ProductsScreen = () => (
+  const renderProductsScreen = () => (
     <View style={styles.container}>
       {isProductsLoading && !productsLoaded && <ActivityIndicator size="large" color="#0f766e" />}
 
@@ -1001,9 +1023,9 @@ export default function App() {
     <SafeAreaView style={styles.safeArea}>
       <Navbar />
 
-      {currentScreen === 'machines' && <MachinesScreen />}
+      {currentScreen === 'machines' && renderMachinesScreen()}
       {currentScreen === 'moulds' && <MouldsScreen />}
-      {currentScreen === 'products' && <ProductsScreen />}
+      {currentScreen === 'products' && renderProductsScreen()}
 
       <Modal visible={showMenu} animationType="fade" transparent={true}>
         <Pressable style={styles.menuOverlay} onPress={() => setShowMenu(false)}>
@@ -1479,6 +1501,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   progressBarOuter: {
+    position: 'relative',
     width: '100%',
     height: 16,
     backgroundColor: '#e2e8f0',
@@ -1489,16 +1512,40 @@ const styles = StyleSheet.create({
     borderColor: '#cbd5e1',
   },
   progressBarInner: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
     height: '100%',
     borderRadius: 999,
     minWidth: 4,
   },
-  progressText: {
+  progressBarTheoretical: {
+    backgroundColor: '#ef4444',
+    opacity: 0.7,
+    zIndex: 1,
+  },
+  progressBarActual: {
+    backgroundColor: '#2563eb',
+    opacity: 0.95,
+    zIndex: 2,
+  },
+  progressLegendRow: {
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  progressLegendItem: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#0f172a',
-    marginBottom: 8,
-    textAlign: 'right',
+    marginBottom: 2,
+  },
+  progressLegendSwatchTheoretical: {
+    color: '#ef4444',
+    fontWeight: '800',
+  },
+  progressLegendSwatchActual: {
+    color: '#2563eb',
+    fontWeight: '800',
   },
   delayText: {
     fontSize: 13,
