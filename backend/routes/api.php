@@ -2,6 +2,7 @@
 
 use App\Models\Machine;
 use App\Models\Mould;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\Error;
 use Illuminate\Support\Facades\Route;
@@ -104,4 +105,38 @@ Route::get('/products', function () {
         ])
         ->orderBy('name')
         ->get();
+});
+
+// ── Orders ───────────────────────────────────────────────────────────────────
+
+Route::get('/orders', function () {
+    return Order::query()
+        ->select(['id', 'order_number', 'machine_id', 'mould_id', 'product_id', 'cycle_time', 'net_weight', 'gross_weight', 'color_percentage', 'status'])
+        ->with([
+            'machine:id,name',
+            'mould:id,name,number',
+            'product:id,name,code',
+        ])
+        ->orderBy('order_number')
+        ->get();
+});
+
+Route::post('/orders/{id}/status', function (Illuminate\Http\Request $request, $id) {
+    $validated = $request->validate([
+        'status' => 'required|in:waiting,in_progress,paused,completed',
+        'pause_description' => 'nullable|string',
+    ]);
+
+    $order = Order::findOrFail($id);
+    $status = $validated['status'];
+    $pauseDescription = $status === 'paused'
+        ? ($validated['pause_description'] ?? null)
+        : null;
+
+    $order->update([
+        'status' => $status,
+        'pause_description' => $pauseDescription,
+    ]);
+
+    return $order->load(['machine:id,name', 'mould:id,name,number', 'product:id,name,code']);
 });
