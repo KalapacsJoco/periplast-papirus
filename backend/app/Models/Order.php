@@ -18,6 +18,8 @@ class Order extends Model
         'date',
         'customer',
         'quantity',
+        'current_quantity',
+        'started_at',
         'cycle_time',
         'net_weight',
         'gross_weight',
@@ -31,6 +33,8 @@ class Order extends Model
     protected $casts = [
         'date' => 'date',
         'quantity' => 'integer',
+        'current_quantity' => 'integer',
+        'started_at' => 'datetime',
         'cycle_time' => 'integer',
         'net_weight' => 'decimal:3',
         'gross_weight' => 'decimal:3',

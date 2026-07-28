@@ -34,13 +34,18 @@ type Order = {
   machine_id: number;
   mould_id: number;
   product_id: number;
+  date?: string;
+  customer?: string;
+  quantity: number;
+  current_quantity?: number;
+  started_at?: string | null;
   cycle_time: number | null;
   net_weight: string | number | null;
   gross_weight: string | number | null;
   color_percentage: string | number | null;
   status: string;
   machine?: { id: number; name: string; status?: string; problem_description?: string };
-  mould?: { id: number; name: string; number: string; status?: string; problem_description?: string };
+  mould?: { id: number; name: string; number: string; cavity_count?: number | null; status?: string; problem_description?: string };
   product?: { id: number; name: string; code: string; is_active?: boolean };
 };
 
@@ -85,6 +90,8 @@ export default function App() {
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [ordersLoaded, setOrdersLoaded] = useState(false);
+  const [productionDrafts, setProductionDrafts] = useState<Record<number, { cycle_time: string; quantity: string; current_quantity: string }>>({});
+  const [clockTick, setClockTick] = useState(0);
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -129,6 +136,11 @@ export default function App() {
     loadOrders();
   }, []);
 
+  useEffect(() => {
+    const timer = setInterval(() => setClockTick((current) => current + 1), 10000);
+    return () => clearInterval(timer);
+  }, []);
+
   const loadMachines = async () => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -159,6 +171,18 @@ export default function App() {
 
       const data = (await response.json()) as Order[];
       setOrders(data);
+      setProductionDrafts(
+        Object.fromEntries(
+          data.map((order) => [
+            order.id,
+            {
+              cycle_time: String(order.cycle_time ?? ''),
+              quantity: String(order.quantity ?? ''),
+              current_quantity: String(order.current_quantity ?? 0),
+            },
+          ])
+        )
+      );
       setOrdersLoaded(true);
     } catch (error) {
       setOrdersError(
@@ -370,6 +394,219 @@ export default function App() {
     if (target === 'machine') return ['warning', 'broken'].includes(status);
     if (target === 'mould') return ['warning', 'needs_repair'].includes(status);
     return false;
+  };
+
+  const getProductionDraft = (order: Order) => {
+    return productionDrafts[order.id] ?? {
+      cycle_time: String(order.cycle_time ?? ''),
+      quantity: String(order.quantity ?? ''),
+      current_quantity: String(order.current_quantity ?? 0),
+    };
+  };
+
+  const updateProductionDraft = (orderId: number, field: 'cycle_time' | 'quantity' | 'current_quantity', value: string) => {
+    setProductionDrafts((current) => ({
+      ...current,
+      [orderId]: {
+        ...current[orderId],
+        [field]: value,
+      },
+    }));
+  };
+
+  const isWorkingTime = (date: Date) => {
+    const day = date.getDay();
+    const hour = date.getHours() + date.getMinutes() / 60;
+
+    if (day === 0) return false;
+    if (day === 6) return hour < 5;
+    if (day === 5) return true;
+    return hour >= 7;
+  };
+
+  const nextWorkingStart = (date: Date) => {
+    const next = new Date(date);
+
+    if (date.getDay() === 6) {
+      next.setDate(date.getDate() + 2);
+      next.setHours(7, 0, 0, 0);
+      return next;
+    }
+
+    if (date.getDay() === 0) {
+      next.setDate(date.getDate() + 1);
+      next.setHours(7, 0, 0, 0);
+      return next;
+    }
+
+    if (date.getHours() < 7) {
+      next.setHours(7, 0, 0, 0);
+      return next;
+    }
+
+    return next;
+  };
+
+  const workingIntervalEnd = (date: Date) => {
+    const end = new Date(date);
+
+    if (date.getDay() === 6 && date.getHours() < 5) {
+      end.setHours(5, 0, 0, 0);
+      return end;
+    }
+
+    const daysUntilSaturday = (6 - date.getDay() + 7) % 7 || 7;
+    end.setDate(date.getDate() + daysUntilSaturday);
+    end.setHours(5, 0, 0, 0);
+    return end;
+  };
+
+  const addWorkingSeconds = (start: Date, seconds: number) => {
+    let current = new Date(start);
+    let remaining = Math.max(0, seconds);
+
+    while (remaining > 0) {
+      if (!isWorkingTime(current)) {
+        current = nextWorkingStart(current);
+        continue;
+      }
+
+      const intervalEnd = workingIntervalEnd(current);
+      const available = Math.max(0, (intervalEnd.getTime() - current.getTime()) / 1000);
+      const consumed = Math.min(available, remaining);
+      current = new Date(current.getTime() + consumed * 1000);
+      remaining -= consumed;
+
+      if (remaining > 0) {
+        current = nextWorkingStart(current);
+      }
+    }
+
+    return current;
+  };
+
+  const workingSecondsBetween = (from: Date, to: Date) => {
+    if (to <= from) return 0;
+
+    let current = new Date(from);
+    let total = 0;
+
+    while (current < to) {
+      if (!isWorkingTime(current)) {
+        current = nextWorkingStart(current);
+        continue;
+      }
+
+      const intervalEnd = workingIntervalEnd(current);
+      const segmentEnd = intervalEnd < to ? intervalEnd : to;
+      total += Math.max(0, (segmentEnd.getTime() - current.getTime()) / 1000);
+
+      if (segmentEnd >= to) break;
+      current = nextWorkingStart(segmentEnd);
+    }
+
+    return total;
+  };
+
+  const formatDuration = (seconds: number) => {
+    const safeSeconds = Math.max(0, Math.round(seconds));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    return `${hours}h ${minutes}m`;
+  };
+
+  const saveProductionData = async (order: Order) => {
+    const draft = getProductionDraft(order);
+    const cycleTime = Number(draft.cycle_time);
+    const quantity = Number(draft.quantity);
+    const currentQuantity = Number(draft.current_quantity);
+
+    if (!cycleTime || !quantity || currentQuantity < 0) {
+      Alert.alert(t('error'), t('unknown_error'));
+      return;
+    }
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/orders/${order.id}/production-data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cycle_time: cycleTime,
+          quantity,
+          current_quantity: currentQuantity,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`${t('error')}: ${response.status}`);
+
+      const updated = (await response.json()) as Order;
+      setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setProductionDrafts((current) => ({
+        ...current,
+        [updated.id]: {
+          cycle_time: String(updated.cycle_time ?? ''),
+          quantity: String(updated.quantity ?? ''),
+          current_quantity: String(updated.current_quantity ?? 0),
+        },
+      }));
+      Alert.alert(t('success'), t('production_data_saved'));
+    } catch (error) {
+      Alert.alert(t('error'), error instanceof Error ? error.message : t('unknown_error'));
+    }
+  };
+
+  const getOrderTracking = (order: Order) => {
+    const startedAt = order.started_at ? new Date(order.started_at) : null;
+    const mouldCount = order.mould?.cavity_count ?? 1;
+    const totalPieces = Math.max(1, Number(order.quantity ?? 0));
+    const totalCycles = Math.max(1, Math.ceil(totalPieces / Math.max(1, mouldCount)));
+    const cycleTime = Math.max(1, Number(order.cycle_time ?? 0));
+    const totalSeconds = totalCycles * cycleTime;
+    const currentPieces = Math.max(0, Number(order.current_quantity ?? 0));
+    const remainingPieces = Math.max(0, totalPieces - currentPieces);
+    const remainingCycles = Math.max(0, Math.ceil(remainingPieces / Math.max(1, mouldCount)));
+    const remainingSeconds = remainingCycles * cycleTime;
+    const now = new Date();
+    const elapsedSeconds = startedAt ? workingSecondsBetween(startedAt, now) : 0;
+    const theoreticalProgress = Math.min(1, totalSeconds > 0 ? elapsedSeconds / totalSeconds : 0);
+    const actualProgress = Math.min(1, totalPieces > 0 ? currentPieces / totalPieces : 0);
+    const theoreticalEta = startedAt ? addWorkingSeconds(startedAt, totalSeconds) : null;
+    const actualEta = startedAt ? addWorkingSeconds(now, remainingSeconds) : null;
+    const delaySeconds = theoreticalEta && actualEta ? Math.max(0, (actualEta.getTime() - theoreticalEta.getTime()) / 1000) : 0;
+
+    return {
+      startedAt,
+      mouldCount,
+      totalPieces,
+      totalCycles,
+      totalSeconds,
+      currentPieces,
+      remainingPieces,
+      remainingCycles,
+      remainingSeconds,
+      theoreticalProgress,
+      actualProgress,
+      theoreticalEta,
+      actualEta,
+      delaySeconds,
+    };
+  };
+
+  const formatEta = (date: Date | null) => {
+    if (!date) return '-';
+    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  };
+
+  const getProgressBarColor = (value: number) => {
+    if (value >= 0.85) return '#22c55e';
+    if (value >= 0.5) return '#0f766e';
+    if (value >= 0.2) return '#f59e0b';
+    return '#ef4444';
+  };
+
+  const percentWidth = (value: number) => {
+    const bounded = Math.max(0, Math.min(1, value));
+    return `${Math.max(4, Math.round(bounded * 100))}%`;
   };
 
   const loadProducts = async () => {
@@ -620,6 +857,83 @@ export default function App() {
                 <Text style={styles.machineMeta}>
                   {t('mould')}: {item.currentOrder.mould?.name ?? '-'}
                 </Text>
+                <Text style={styles.machineMeta}>
+                  {t('cycle_time_seconds')}: {item.currentOrder.cycle_time ?? '-'}
+                </Text>
+                <Text style={styles.machineMeta}>
+                  {t('total_quantity')}: {item.currentOrder.quantity}
+                </Text>
+
+                {(() => {
+                  const tracking = getOrderTracking(item.currentOrder);
+                  const draft = getProductionDraft(item.currentOrder);
+
+                  return (
+                    <>
+                      <View style={styles.productionInputsRow}>
+                        <View style={styles.productionInputBlock}>
+                          <Text style={styles.productionLabel}>{t('cycle_time_seconds')}</Text>
+                          <TextInput
+                            style={styles.productionInput}
+                            keyboardType="numeric"
+                            value={draft.cycle_time}
+                            onChangeText={(value) => updateProductionDraft(item.currentOrder.id, 'cycle_time', value)}
+                          />
+                        </View>
+                        <View style={styles.productionInputBlock}>
+                          <Text style={styles.productionLabel}>{t('total_quantity')}</Text>
+                          <TextInput
+                            style={styles.productionInput}
+                            keyboardType="numeric"
+                            value={draft.quantity}
+                            onChangeText={(value) => updateProductionDraft(item.currentOrder.id, 'quantity', value)}
+                          />
+                        </View>
+                        <View style={styles.productionInputBlock}>
+                          <Text style={styles.productionLabel}>{t('current_quantity')}</Text>
+                          <TextInput
+                            style={styles.productionInput}
+                            keyboardType="numeric"
+                            value={draft.current_quantity}
+                            onChangeText={(value) => updateProductionDraft(item.currentOrder.id, 'current_quantity', value)}
+                          />
+                        </View>
+                      </View>
+
+                      <Pressable
+                        style={[styles.actionButton, styles.productionSaveButton]}
+                        onPress={() => saveProductionData(item.currentOrder!)}
+                      >
+                        <Text style={styles.actionButtonText}>{t('save_production_data')}</Text>
+                      </Pressable>
+
+                      <View style={styles.progressGroup}>
+                        <Text style={styles.progressLabel}>{t('theoretical_progress')}</Text>
+                        <View style={styles.progressBarOuter}>
+                          <View style={[styles.progressBarInner, { width: percentWidth(tracking.theoreticalProgress), backgroundColor: getProgressBarColor(tracking.theoreticalProgress) }]} />
+                        </View>
+                        <Text style={styles.progressText}>{Math.round(tracking.theoreticalProgress * 100)}%</Text>
+
+                        <Text style={styles.progressLabel}>{t('actual_progress')}</Text>
+                        <View style={styles.progressBarOuter}>
+                          <View style={[styles.progressBarInner, { width: percentWidth(tracking.actualProgress), backgroundColor: getProgressBarColor(tracking.actualProgress) }]} />
+                        </View>
+                        <Text style={styles.progressText}>{Math.round(tracking.actualProgress * 100)}%</Text>
+
+                        <Text style={styles.delayText}>
+                          {t('delay')}: {formatDuration(tracking.delaySeconds)}
+                        </Text>
+
+                        <Text style={styles.machineMeta}>
+                          {t('theoretical_eta')}: {formatEta(tracking.theoreticalEta)}
+                        </Text>
+                        <Text style={styles.machineMeta}>
+                          {t('actual_eta')}: {formatEta(tracking.actualEta)}
+                        </Text>
+                      </View>
+                    </>
+                  );
+                })()}
               </View>
             ) : (
               <Text style={styles.inactiveText}>{t('no_active_order')}</Text>

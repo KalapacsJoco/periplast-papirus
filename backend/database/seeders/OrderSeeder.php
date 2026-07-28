@@ -41,6 +41,11 @@ class OrderSeeder extends Seeder
                 $netWeight = fake()->numberBetween(80, 3500);
                 $wastePercentage = fake()->numberBetween(3, 18);
                 $grossWeight = $netWeight + ($netWeight * $wastePercentage / 100);
+                $orderQuantity = fake()->numberBetween(50, 300);
+                $productionStartedAt = $status === 'in_progress' ? now()->subMinutes(rand(2, 18)) : null;
+                $currentQuantity = $status === 'in_progress'
+                    ? fake()->numberBetween(1, max(1, $orderQuantity - 1))
+                    : 0;
 
                 Order::create([
                     'order_number' => sprintf('ORD-%s-%02d-%02d', now()->format('Y'), $index + 1, $orderOffset + 1),
@@ -49,8 +54,10 @@ class OrderSeeder extends Seeder
                     'product_id' => $product->id,
                     'date' => now()->addDays($orderOffset)->toDateString(),
                     'customer' => sprintf('Customer %02d', $index + 1),
-                    'quantity' => fake()->numberBetween(1000, 25000),
-                    'cycle_time' => fake()->numberBetween(12000, 85000),
+                    'quantity' => $orderQuantity,
+                    'current_quantity' => $currentQuantity,
+                    'started_at' => $productionStartedAt,
+                    'cycle_time' => fake()->numberBetween(10, 20),
                     'net_weight' => $netWeight,
                     'gross_weight' => round($grossWeight, 3),
                     'color_percentage' => $product->color_id ? round(fake()->randomFloat(2, 0.2, 6), 2) : null,
