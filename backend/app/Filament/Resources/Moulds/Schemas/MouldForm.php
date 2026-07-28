@@ -13,8 +13,9 @@ class MouldForm
     {
         return $schema
             ->components([
-                Select::make('product_id')
-                    ->relationship('product', 'name')
+                Select::make('products')
+                    ->relationship('products', 'name')
+                    ->multiple()
                     ->searchable()
                     ->preload()
                     ->required(),

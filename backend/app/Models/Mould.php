@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -13,7 +12,6 @@ class Mould extends Model
     use HasFactory;
 
     protected $fillable = [
-        'product_id',
         'name',
         'type',
         'number',
@@ -24,9 +22,9 @@ class Mould extends Model
         'problem_description',
     ];
 
-    public function product(): BelongsTo
+    public function products(): BelongsToMany
     {
-        return $this->belongsTo(Product::class);
+        return $this->belongsToMany(Product::class);
     }
 
     public function machines(): BelongsToMany

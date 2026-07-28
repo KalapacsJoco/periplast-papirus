@@ -14,8 +14,9 @@ class MouldsTable
     {
         return $table
             ->columns([
-                TextColumn::make('product.name')
-                    ->label('Product')
+                TextColumn::make('products.name')
+                    ->label('Products')
+                    ->listWithLineBreaks()
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('name')
