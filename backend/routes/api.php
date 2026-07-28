@@ -113,9 +113,9 @@ Route::get('/orders', function () {
     return Order::query()
         ->select(['id', 'order_number', 'machine_id', 'mould_id', 'product_id', 'cycle_time', 'net_weight', 'gross_weight', 'color_percentage', 'status'])
         ->with([
-            'machine:id,name',
-            'mould:id,name,number',
-            'product:id,name,code',
+            'machine:id,name,status,problem_description',
+            'mould:id,name,number,status,problem_description',
+            'product:id,name,code,is_active',
         ])
         ->orderBy('order_number')
         ->get();
@@ -139,4 +139,23 @@ Route::post('/orders/{id}/status', function (Illuminate\Http\Request $request, $
     ]);
 
     return $order->load(['machine:id,name', 'mould:id,name,number', 'product:id,name,code']);
+});
+
+Route::post('/products/{id}/status', function (Illuminate\Http\Request $request, $id) {
+    $validated = $request->validate([
+        'status' => 'required|in:active,inactive',
+    ]);
+
+    $product = Product::findOrFail($id);
+
+    $product->update([
+        'is_active' => $validated['status'] === 'active',
+    ]);
+
+    return $product->load([
+        'material:id,name,code',
+        'color:id,name,code',
+        'additives:id,name,code',
+        'moulds:id,name,number',
+    ]);
 });

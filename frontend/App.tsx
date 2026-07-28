@@ -1,7 +1,7 @@
 import './i18n';
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
@@ -28,6 +28,22 @@ type Machine = {
   problem_description?: string;
 };
 
+type Order = {
+  id: number;
+  order_number: string;
+  machine_id: number;
+  mould_id: number;
+  product_id: number;
+  cycle_time: number | null;
+  net_weight: string | number | null;
+  gross_weight: string | number | null;
+  color_percentage: string | number | null;
+  status: string;
+  machine?: { id: number; name: string; status?: string; problem_description?: string };
+  mould?: { id: number; name: string; number: string; status?: string; problem_description?: string };
+  product?: { id: number; name: string; code: string; is_active?: boolean };
+};
+
 type Mould = {
   id: number;
   name: string;
@@ -44,23 +60,35 @@ type Product = {
   id: number;
   name: string;
   code: string;
+  is_active?: boolean;
   material?: { id: number; name: string; code: string };
   color?: { id: number; name: string; code: string };
   additives?: Array<{ id: number; name: string; code: string }>;
   moulds?: Array<{ id: number; name: string; number: string }>;
 };
 
-type Screen = 'home' | 'machines' | 'moulds' | 'products';
+type DashboardMachine = Machine & {
+  currentOrder: Order | null;
+};
+
+type Screen = 'machines' | 'moulds' | 'products';
+type IssueTarget = 'machine' | 'mould' | 'product';
 
 export default function App() {
   const { t, i18n } = useTranslation();
-  const [currentScreen, setCurrentScreen] = useState<Screen>('home');
+  const [currentScreen, setCurrentScreen] = useState<Screen>('machines');
   const [machines, setMachines] = useState<Machine[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isOrdersLoading, setIsOrdersLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [issueTarget, setIssueTarget] = useState<IssueTarget>('machine');
   const [newStatus, setNewStatus] = useState<string>('');
   const [problemDescription, setProblemDescription] = useState<string>('');
   const [isUpdating, setIsUpdating] = useState(false);
@@ -96,6 +124,11 @@ export default function App() {
     return 'http://127.0.0.1:8000';
   }, []);
 
+  useEffect(() => {
+    loadMachines();
+    loadOrders();
+  }, []);
+
   const loadMachines = async () => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -116,10 +149,49 @@ export default function App() {
     }
   };
 
+  const loadOrders = async () => {
+    setIsOrdersLoading(true);
+    setOrdersError(null);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/orders`);
+      if (!response.ok) throw new Error(`${t('api_error')}: ${response.status}`);
+
+      const data = (await response.json()) as Order[];
+      setOrders(data);
+      setOrdersLoaded(true);
+    } catch (error) {
+      setOrdersError(
+        error instanceof Error ? error.message : t('unknown_error')
+      );
+    } finally {
+      setIsOrdersLoading(false);
+    }
+  };
+
   const openStatusModal = (machine: Machine) => {
     setSelectedMachine(machine);
     setNewStatus(machine.status);
     setProblemDescription(machine.problem_description || '');
+    setShowModal(true);
+  };
+
+  const openIssueModal = (machine: DashboardMachine, target: IssueTarget = 'machine') => {
+    setSelectedMachine(machine);
+    setIssueTarget(target);
+
+    if (target === 'machine') {
+      setNewStatus(machine.status);
+      setProblemDescription(machine.problem_description || '');
+    } else if (target === 'mould') {
+      const mould = machine.currentOrder?.mould;
+      setNewStatus(mould?.status || 'active');
+      setProblemDescription(mould?.problem_description || '');
+    } else {
+      setNewStatus(machine.currentOrder?.product?.is_active ? 'active' : 'inactive');
+      setProblemDescription('');
+    }
+
     setShowModal(true);
   };
 
@@ -128,15 +200,48 @@ export default function App() {
     setIsUpdating(true);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/machines/${selectedMachine.id}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus, problem_description: problemDescription }),
-      });
+      let response: Response;
 
-      if (!response.ok) throw new Error(`${t('error')}: ${response.status}`);
-      const updated = (await response.json()) as Machine;
-      setMachines(machines.map(m => m.id === updated.id ? updated : m));
+      if (issueTarget === 'machine') {
+        response = await fetch(`${apiBaseUrl}/api/machines/${selectedMachine.id}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus, problem_description: problemDescription }),
+        });
+
+        if (!response.ok) throw new Error(`${t('error')}: ${response.status}`);
+        const updated = (await response.json()) as Machine;
+        setMachines(machines.map(m => (m.id === updated.id ? updated : m)));
+      } else if (issueTarget === 'mould') {
+        const mouldId = selectedMachine.currentOrder?.mould_id;
+        if (!mouldId) throw new Error(t('unknown_error'));
+
+        response = await fetch(`${apiBaseUrl}/api/moulds/${mouldId}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus, problem_description: problemDescription }),
+        });
+
+        if (!response.ok) throw new Error(`${t('error')}: ${response.status}`);
+        const updated = (await response.json()) as Mould;
+        setOrders(orders.map(order => order.mould_id === updated.id ? { ...order, mould: { ...updated } } : order));
+        setMoulds(moulds.map(m => (m.id === updated.id ? updated : m)));
+      } else {
+        const productId = selectedMachine.currentOrder?.product_id;
+        if (!productId) throw new Error(t('unknown_error'));
+
+        response = await fetch(`${apiBaseUrl}/api/products/${productId}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        });
+
+        if (!response.ok) throw new Error(`${t('error')}: ${response.status}`);
+        const updated = (await response.json()) as Product;
+        setOrders(orders.map(order => order.product_id === updated.id ? { ...order, product: { ...updated } } : order));
+        setProducts(products.map(p => (p.id === updated.id ? updated : p)));
+      }
+
       setShowModal(false);
       Alert.alert(t('success'), t('status_updated'));
     } catch (error) {
@@ -187,6 +292,84 @@ export default function App() {
     } finally {
       setIsMouldsLoading(false);
     }
+  };
+
+  const dashboardMachines = useMemo<DashboardMachine[]>(() => {
+    return machines.map((machine) => {
+      const currentOrder = orders.find(
+        (order) => order.machine_id === machine.id && order.status === 'in_progress'
+      ) ?? null;
+
+      return { ...machine, currentOrder };
+    });
+  }, [machines, orders]);
+
+  const activeOrdersCount = useMemo(
+    () => orders.filter((order) => order.status === 'in_progress').length,
+    [orders]
+  );
+
+  const getDashboardStatusColor = (active: boolean) => (active ? '#22c55e' : '#999999');
+
+  const getDashboardStatusLabel = (active: boolean) =>
+    active ? t('machine_status_active') : t('machine_status_inactive');
+
+  const getIssueStatusColor = (target: IssueTarget, status: string) => {
+    if (target === 'product') return status === 'active' ? '#22c55e' : '#999999';
+
+    switch (status) {
+      case 'active':
+        return '#22c55e';
+      case 'standby':
+      case 'stopped':
+        return '#999999';
+      case 'warning':
+        return '#f59e0b';
+      case 'broken':
+      case 'needs_repair':
+        return '#ef4444';
+      case 'under_repair':
+        return '#3b82f6';
+      default:
+        return '#999999';
+    }
+  };
+
+  const getIssueStatusLabel = (target: IssueTarget, status: string) => {
+    if (target === 'product') {
+      return status === 'active' ? t('status_active') : t('status_inactive');
+    }
+
+    switch (status) {
+      case 'active':
+        return t('status_active');
+      case 'stopped':
+        return t('status_stopped');
+      case 'standby':
+        return t('mould_status_standby');
+      case 'warning':
+        return t('status_warning');
+      case 'broken':
+        return t('status_broken');
+      case 'needs_repair':
+        return t('mould_status_needs_repair');
+      case 'under_repair':
+        return t('mould_status_under_repair');
+      default:
+        return status;
+    }
+  };
+
+  const getIssueStatuses = (target: IssueTarget) => {
+    if (target === 'machine') return ['active', 'stopped', 'warning', 'broken'];
+    if (target === 'mould') return ['active', 'standby', 'warning', 'needs_repair', 'under_repair'];
+    return ['active', 'inactive'];
+  };
+
+  const requiresProblemDescription = (target: IssueTarget, status: string) => {
+    if (target === 'machine') return ['warning', 'broken'].includes(status);
+    if (target === 'mould') return ['warning', 'needs_repair'].includes(status);
+    return false;
   };
 
   const loadProducts = async () => {
@@ -286,33 +469,35 @@ export default function App() {
 
   const Navbar = () => (
     <View style={styles.navbar}>
-      <Pressable
-        style={styles.navButton}
-        onPress={() => currentScreen !== 'home' && setCurrentScreen('home')}
-      >
-        <Text style={styles.navButtonText}>
-          {currentScreen === 'home' ? t('app_title') : t('back')}
-        </Text>
-      </Pressable>
+      <View style={styles.navTitleGroup}>
+        <Text style={styles.navTitle}>{t('app_title')}</Text>
+        <Text style={styles.navSubtitle}>{t('dashboard_title')}</Text>
+      </View>
 
-      <View style={styles.navLanguageGroup}>
-        <Pressable
-          style={[
-            styles.langButton,
-            i18n.language === 'hu' && styles.langButtonActive,
-          ]}
-          onPress={() => switchLanguage('hu')}
-        >
-          <Text style={styles.langButtonText}>🇭🇺</Text>
-        </Pressable>
-        <Pressable
-          style={[
-            styles.langButton,
-            i18n.language === 'de' && styles.langButtonActive,
-          ]}
-          onPress={() => switchLanguage('de')}
-        >
-          <Text style={styles.langButtonText}>🇩🇪</Text>
+      <View style={styles.navRightGroup}>
+        <View style={styles.navLanguageGroup}>
+          <Pressable
+            style={[
+              styles.langButton,
+              i18n.language === 'hu' && styles.langButtonActive,
+            ]}
+            onPress={() => switchLanguage('hu')}
+          >
+            <Text style={styles.langButtonText}>🇭🇺</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.langButton,
+              i18n.language === 'de' && styles.langButtonActive,
+            ]}
+            onPress={() => switchLanguage('de')}
+          >
+            <Text style={styles.langButtonText}>🇩🇪</Text>
+          </Pressable>
+        </View>
+
+        <Pressable style={styles.menuButton} onPress={() => setShowMenu(true)}>
+          <Text style={styles.menuButtonText}>☰</Text>
         </Pressable>
       </View>
     </View>
@@ -320,38 +505,8 @@ export default function App() {
 
   const HomeScreen = () => (
     <ScrollView contentContainerStyle={styles.homeContainer}>
-      <Text style={styles.homeTitle}>{t('app_title')}</Text>
-      <Text style={styles.homeSubtitle}>Injection Molding ERP System</Text>
-
-      <Pressable
-        style={styles.homeButton}
-        onPress={() => {
-          setCurrentScreen('machines');
-          loadMachines();
-        }}
-      >
-        <Text style={styles.homeButtonText}>{t('machines_button_label')}</Text>
-      </Pressable>
-
-      <Pressable
-        style={styles.homeButton}
-        onPress={() => {
-          setCurrentScreen('moulds');
-          loadMoulds();
-        }}
-      >
-        <Text style={styles.homeButtonText}>{t('moulds_button_label')}</Text>
-      </Pressable>
-
-      <Pressable
-        style={styles.homeButton}
-        onPress={() => {
-          setCurrentScreen('products');
-          loadProducts();
-        }}
-      >
-        <Text style={styles.homeButtonText}>{t('products_button_label')}</Text>
-      </Pressable>
+      <Text style={styles.homeTitle}>{t('dashboard_title')}</Text>
+      <Text style={styles.homeSubtitle}>{t('dashboard_subtitle')}</Text>
 
       <View style={styles.homeInfo}>
         <Text style={styles.homeInfoTitle}>Papirus</Text>
@@ -416,55 +571,64 @@ export default function App() {
 
   const MachinesScreen = () => (
     <View style={styles.container}>
-      {isLoading && !hasLoaded && <ActivityIndicator size="large" color="#0f766e" />}
+      {(isLoading || isOrdersLoading) && !hasLoaded && !ordersLoaded && <ActivityIndicator size="large" color="#0f766e" />}
 
-      {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+      {errorMessage || ordersError ? <Text style={styles.errorText}>{errorMessage || ordersError}</Text> : null}
 
-      {hasLoaded && !isLoading && machines.length === 0 ? (
+      {hasLoaded && ordersLoaded && !isLoading && !isOrdersLoading && machines.length === 0 ? (
         <Text style={styles.emptyText}>{t('no_machines')}</Text>
       ) : null}
 
       <FlatList
-        data={machines}
+        data={dashboardMachines}
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
           <View style={styles.machineCard}>
             <View style={styles.machineHeader}>
-              <Text style={styles.machineName}>{item.name}</Text>
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-                <Text style={styles.statusBadgeText}>{getStatusLabel(item.status)}</Text>
+              <View style={styles.machineHeaderLeft}>
+                <Text style={styles.machineName}>{item.name}</Text>
+                <Text style={styles.machineMeta}>
+                  {t('machine_type')}: {item.type}
+                </Text>
+              </View>
+              <View style={styles.machineHeaderRight}>
+                <View style={[styles.statusBadge, { backgroundColor: getDashboardStatusColor(Boolean(item.currentOrder)) }]}>
+                  <Text style={styles.statusBadgeText}>{getDashboardStatusLabel(Boolean(item.currentOrder))}</Text>
+                </View>
+                {item.currentOrder && (
+                  <Pressable style={styles.issueButton} onPress={() => openIssueModal(item, 'machine')}>
+                    <Text style={styles.issueButtonText}>⚠️</Text>
+                  </Pressable>
+                )}
               </View>
             </View>
-            <Text style={styles.machineMeta}>
-              {t('machine_type')}: {item.type}
-            </Text>
             <Text style={styles.machineMeta}>
               {t('opening')}: {item.open_mm ?? '-'} {t('mm')}
             </Text>
             <Text style={styles.machineMeta}>
               {t('screw_diameter')}: {item.screw_diameter_cm ?? '-'} {t('cm')}
             </Text>
+            {item.currentOrder ? (
+              <View style={styles.currentOrderBox}>
+                <Text style={styles.currentOrderTitle}>{t('current_order')}</Text>
+                <Text style={styles.machineMeta}>
+                  {t('order_number')}: {item.currentOrder.order_number}
+                </Text>
+                <Text style={styles.machineMeta}>
+                  {t('product')}: {item.currentOrder.product?.name ?? '-'}
+                </Text>
+                <Text style={styles.machineMeta}>
+                  {t('mould')}: {item.currentOrder.mould?.name ?? '-'}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.inactiveText}>{t('no_active_order')}</Text>
+            )}
             {item.problem_description && (
               <Text style={styles.problemText}>
                 {t('problem')}: {item.problem_description}
               </Text>
             )}
-            <View style={styles.buttonGroup}>
-              <Pressable
-                style={[styles.actionButton, { backgroundColor: '#0f766e' }]}
-                onPress={() => openStatusModal(item)}
-              >
-                <Text style={styles.actionButtonText}>{t('change_status')}</Text>
-              </Pressable>
-              {item.status === 'broken' && (
-                <Pressable
-                  style={[styles.actionButton, { backgroundColor: '#059669' }]}
-                  onPress={() => restoreMachine(item)}
-                >
-                  <Text style={styles.actionButtonText}>{t('restore')}</Text>
-                </Pressable>
-              )}
-            </View>
           </View>
         )}
         contentContainerStyle={styles.listContent}
@@ -489,6 +653,9 @@ export default function App() {
           <View style={styles.machineCard}>
             <View style={styles.machineHeader}>
               <Text style={styles.machineName}>{item.name}</Text>
+              <View style={[styles.statusBadge, { backgroundColor: item.is_active ? '#22c55e' : '#999999' }]}>
+                <Text style={styles.statusBadgeText}>{item.is_active ? t('status_active') : t('status_inactive')}</Text>
+              </View>
             </View>
 
             <Text style={styles.machineMeta}>
@@ -525,21 +692,84 @@ export default function App() {
     <SafeAreaView style={styles.safeArea}>
       <Navbar />
 
-      {currentScreen === 'home' && <HomeScreen />}
       {currentScreen === 'machines' && <MachinesScreen />}
       {currentScreen === 'moulds' && <MouldsScreen />}
       {currentScreen === 'products' && <ProductsScreen />}
 
+      <Modal visible={showMenu} animationType="fade" transparent={true}>
+        <Pressable style={styles.menuOverlay} onPress={() => setShowMenu(false)}>
+          <View style={styles.menuDropdown}>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setShowMenu(false);
+                setCurrentScreen('machines');
+                loadMachines();
+                loadOrders();
+              }}
+            >
+              <Text style={styles.menuItemText}>{t('machines_button_label')}</Text>
+            </Pressable>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setShowMenu(false);
+                setCurrentScreen('moulds');
+                loadMoulds();
+              }}
+            >
+              <Text style={styles.menuItemText}>{t('moulds_button_label')}</Text>
+            </Pressable>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setShowMenu(false);
+                setCurrentScreen('products');
+                loadProducts();
+              }}
+            >
+              <Text style={styles.menuItemText}>{t('products_button_label')}</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
       <Modal visible={showModal} animationType="slide" transparent={true}>
         <SafeAreaView style={styles.modalContainer}>
           <ScrollView style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{t('change_status')}</Text>
+            <Text style={styles.modalTitle}>{t('issue_report_title')}</Text>
             {selectedMachine && (
               <>
                 <Text style={styles.modalMachineName}>{selectedMachine.name}</Text>
 
+                <Text style={styles.modalLabel}>{t('issue_target')}:</Text>
+                <View style={styles.targetButtonGroup}>
+                  <Pressable
+                    style={[styles.targetButton, issueTarget === 'machine' && styles.targetButtonSelected]}
+                    onPress={() => openIssueModal(selectedMachine as DashboardMachine, 'machine')}
+                  >
+                    <Text style={styles.targetButtonText}>{t('machine')}</Text>
+                  </Pressable>
+                  {selectedMachine.currentOrder?.mould && (
+                    <Pressable
+                      style={[styles.targetButton, issueTarget === 'mould' && styles.targetButtonSelected]}
+                      onPress={() => openIssueModal(selectedMachine as DashboardMachine, 'mould')}
+                    >
+                      <Text style={styles.targetButtonText}>{t('mould')}</Text>
+                    </Pressable>
+                  )}
+                  {selectedMachine.currentOrder?.product && (
+                    <Pressable
+                      style={[styles.targetButton, issueTarget === 'product' && styles.targetButtonSelected]}
+                      onPress={() => openIssueModal(selectedMachine as DashboardMachine, 'product')}
+                    >
+                      <Text style={styles.targetButtonText}>{t('product')}</Text>
+                    </Pressable>
+                  )}
+                </View>
+
                 <Text style={styles.modalLabel}>{t('new_status')}:</Text>
-                {['active', 'stopped', 'warning', 'broken'].map((status) => (
+                {getIssueStatuses(issueTarget).map((status) => (
                   <Pressable
                     key={status}
                     style={[
@@ -551,14 +781,14 @@ export default function App() {
                     <View
                       style={[
                         styles.statusOptionDot,
-                        { backgroundColor: getStatusColor(status) },
+                        { backgroundColor: getIssueStatusColor(issueTarget, status) },
                       ]}
                     />
-                    <Text style={styles.statusOptionText}>{getStatusLabel(status)}</Text>
+                    <Text style={styles.statusOptionText}>{getIssueStatusLabel(issueTarget, status)}</Text>
                   </Pressable>
                 ))}
 
-                {['warning', 'broken'].includes(newStatus) && (
+                {requiresProblemDescription(issueTarget, newStatus) && (
                   <>
                     <Text style={styles.modalLabel}>{t('problem_description')}:</Text>
                     <TextInput
@@ -586,7 +816,7 @@ export default function App() {
                     disabled={isUpdating}
                   >
                     <Text style={styles.modalButtonText}>
-                      {isUpdating ? t('updating') : t('update')}
+                      {isUpdating ? t('updating') : t('save')}
                     </Text>
                   </Pressable>
                 </View>
@@ -695,6 +925,65 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  navTitleGroup: {
+    flexDirection: 'column',
+    flex: 1,
+    marginRight: 12,
+  },
+  navRightGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  navTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  navSubtitle: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  menuButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  menuButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: 72,
+    paddingRight: 16,
+  },
+  menuDropdown: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    paddingVertical: 8,
+    minWidth: 180,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  menuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  menuItemText: {
+    fontSize: 15,
+    color: '#0f172a',
+    fontWeight: '600',
+  },
   langButton: {
     paddingVertical: 8,
     paddingHorizontal: 12,
@@ -798,6 +1087,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
+  machineHeaderLeft: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  machineHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   machineName: {
     fontSize: 17,
     fontWeight: '700',
@@ -814,6 +1112,36 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 12,
     fontWeight: '600',
+  },
+  issueButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fee2e2',
+  },
+  issueButtonText: {
+    fontSize: 18,
+  },
+  currentOrderBox: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  currentOrderTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f766e',
+    marginBottom: 6,
+  },
+  inactiveText: {
+    marginTop: 10,
+    color: '#64748b',
+    fontStyle: 'italic',
   },
   machineMeta: {
     fontSize: 14,
@@ -935,5 +1263,28 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 15,
     fontWeight: '600',
+  },
+  targetButtonGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  targetButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#ffffff',
+  },
+  targetButtonSelected: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#0f766e',
+  },
+  targetButtonText: {
+    color: '#0f172a',
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'capitalize',
   },
 });
