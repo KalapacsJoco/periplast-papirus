@@ -15,6 +15,12 @@ class MaintenancesTable
         return $table
             ->columns([
                 TextColumn::make('machine.name')
+                    ->label('Machine')
+                    ->placeholder('-')
+                    ->searchable(),
+                TextColumn::make('mould.name')
+                    ->label('Mould')
+                    ->placeholder('-')
                     ->searchable(),
                 TextColumn::make('date')
                     ->date()

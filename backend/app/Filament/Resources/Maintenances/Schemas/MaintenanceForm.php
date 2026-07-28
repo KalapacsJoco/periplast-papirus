@@ -4,7 +4,6 @@ namespace App\Filament\Resources\Maintenances\Schemas;
 
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Schemas\Schema;
 
@@ -16,7 +15,14 @@ class MaintenanceForm
             ->components([
                 Select::make('machine_id')
                     ->relationship('machine', 'name')
-                    ->required(),
+                    ->searchable()
+                    ->preload()
+                    ->rules(['required_without:mould_id']),
+                Select::make('mould_id')
+                    ->relationship('mould', 'name')
+                    ->searchable()
+                    ->preload()
+                    ->rules(['required_without:machine_id']),
                 DatePicker::make('date')
                     ->required(),
                 Select::make('type')

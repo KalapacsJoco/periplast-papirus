@@ -28,7 +28,19 @@ type Machine = {
   problem_description?: string;
 };
 
-type Screen = 'home' | 'machines';
+type Mould = {
+  id: number;
+  name: string;
+  type: string;
+  number: string;
+  cavity_count: number | null;
+  open_mm: number | null;
+  status: string;
+  problem_description?: string;
+  product?: { id: number; name: string };
+};
+
+type Screen = 'home' | 'machines' | 'moulds';
 
 export default function App() {
   const { t, i18n } = useTranslation();
@@ -42,6 +54,17 @@ export default function App() {
   const [newStatus, setNewStatus] = useState<string>('');
   const [problemDescription, setProblemDescription] = useState<string>('');
   const [isUpdating, setIsUpdating] = useState(false);
+
+  // Moulds state
+  const [moulds, setMoulds] = useState<Mould[]>([]);
+  const [isMouldsLoading, setIsMouldsLoading] = useState(false);
+  const [mouldsError, setMouldsError] = useState<string | null>(null);
+  const [mouldsLoaded, setMouldsLoaded] = useState(false);
+  const [selectedMould, setSelectedMould] = useState<Mould | null>(null);
+  const [showMouldModal, setShowMouldModal] = useState(false);
+  const [newMouldStatus, setNewMouldStatus] = useState<string>('');
+  const [mouldProblemDescription, setMouldProblemDescription] = useState<string>('');
+  const [isMouldUpdating, setIsMouldUpdating] = useState(false);
 
   const apiBaseUrl = useMemo(() => {
     const overrideUrl = process.env.EXPO_PUBLIC_API_URL;
@@ -134,6 +157,75 @@ export default function App() {
     ]);
   };
 
+  const loadMoulds = async () => {
+    setIsMouldsLoading(true);
+    setMouldsError(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/moulds`);
+      if (!response.ok) throw new Error(`${t('api_error')}: ${response.status}`);
+      const data = (await response.json()) as Mould[];
+      setMoulds(data);
+      setMouldsLoaded(true);
+    } catch (error) {
+      setMouldsError(error instanceof Error ? error.message : t('unknown_error'));
+    } finally {
+      setIsMouldsLoading(false);
+    }
+  };
+
+  const openMouldStatusModal = (mould: Mould) => {
+    setSelectedMould(mould);
+    setNewMouldStatus(mould.status);
+    setMouldProblemDescription(mould.problem_description || '');
+    setShowMouldModal(true);
+  };
+
+  const updateMouldStatus = async () => {
+    if (!selectedMould) return;
+    setIsMouldUpdating(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/moulds/${selectedMould.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: newMouldStatus,
+          problem_description: mouldProblemDescription,
+        }),
+      });
+      if (!response.ok) throw new Error(`${t('error')}: ${response.status}`);
+      const updated = (await response.json()) as Mould;
+      setMoulds(moulds.map(m => m.id === updated.id ? updated : m));
+      setShowMouldModal(false);
+      Alert.alert(t('success'), t('mould_status_updated'));
+    } catch (error) {
+      Alert.alert(t('error'), error instanceof Error ? error.message : t('unknown_error'));
+    } finally {
+      setIsMouldUpdating(false);
+    }
+  };
+
+  const getMouldStatusColor = (status: string) => {
+    switch (status) {
+      case 'active':       return '#22c55e';
+      case 'standby':      return '#999999';
+      case 'warning':      return '#f59e0b';
+      case 'needs_repair': return '#ef4444';
+      case 'under_repair': return '#3b82f6';
+      default:             return '#999999';
+    }
+  };
+
+  const getMouldStatusLabel = (status: string) => {
+    switch (status) {
+      case 'active':       return t('mould_status_active');
+      case 'standby':      return t('mould_status_standby');
+      case 'warning':      return t('mould_status_warning');
+      case 'needs_repair': return t('mould_status_needs_repair');
+      case 'under_repair': return t('mould_status_under_repair');
+      default:             return status;
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active': return '#22c55e';
@@ -207,6 +299,16 @@ export default function App() {
         <Text style={styles.homeButtonText}>{t('machines_button_label')}</Text>
       </Pressable>
 
+      <Pressable
+        style={styles.homeButton}
+        onPress={() => {
+          setCurrentScreen('moulds');
+          loadMoulds();
+        }}
+      >
+        <Text style={styles.homeButtonText}>{t('moulds_button_label')}</Text>
+      </Pressable>
+
       <View style={styles.homeInfo}>
         <Text style={styles.homeInfoTitle}>Papirus</Text>
         <Text style={styles.homeInfoText}>
@@ -214,6 +316,58 @@ export default function App() {
         </Text>
       </View>
     </ScrollView>
+  );
+
+  const MouldsScreen = () => (
+    <View style={styles.container}>
+      {isMouldsLoading && !mouldsLoaded && <ActivityIndicator size="large" color="#0f766e" />}
+      {mouldsError ? <Text style={styles.errorText}>{mouldsError}</Text> : null}
+      {mouldsLoaded && !isMouldsLoading && moulds.length === 0 ? (
+        <Text style={styles.emptyText}>{t('no_moulds')}</Text>
+      ) : null}
+      <FlatList
+        data={moulds}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item }) => (
+          <View style={styles.machineCard}>
+            <View style={styles.machineHeader}>
+              <Text style={styles.machineName}>{item.name}</Text>
+              <View style={[styles.statusBadge, { backgroundColor: getMouldStatusColor(item.status) }]}>
+                <Text style={styles.statusBadgeText}>{getMouldStatusLabel(item.status)}</Text>
+              </View>
+            </View>
+            {item.product && (
+              <Text style={styles.machineMeta}>
+                {t('product')}: {item.product.name}
+              </Text>
+            )}
+            <Text style={styles.machineMeta}>
+              {t('mould_number')}: {item.number}
+            </Text>
+            <Text style={styles.machineMeta}>
+              {t('cavity_count')}: {item.cavity_count ?? '-'}
+            </Text>
+            <Text style={styles.machineMeta}>
+              {t('opening')}: {item.open_mm ?? '-'} {t('mm')}
+            </Text>
+            {item.problem_description && (
+              <Text style={styles.problemText}>
+                {t('problem')}: {item.problem_description}
+              </Text>
+            )}
+            <View style={styles.buttonGroup}>
+              <Pressable
+                style={[styles.actionButton, { backgroundColor: '#0f766e' }]}
+                onPress={() => openMouldStatusModal(item)}
+              >
+                <Text style={styles.actionButtonText}>{t('change_status')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+        contentContainerStyle={styles.listContent}
+      />
+    </View>
   );
 
   const MachinesScreen = () => (
@@ -278,7 +432,9 @@ export default function App() {
     <SafeAreaView style={styles.safeArea}>
       <Navbar />
 
-      {currentScreen === 'home' ? <HomeScreen /> : <MachinesScreen />}
+      {currentScreen === 'home' && <HomeScreen />}
+      {currentScreen === 'machines' && <MachinesScreen />}
+      {currentScreen === 'moulds' && <MouldsScreen />}
 
       <Modal visible={showModal} animationType="slide" transparent={true}>
         <SafeAreaView style={styles.modalContainer}>
@@ -337,6 +493,65 @@ export default function App() {
                   >
                     <Text style={styles.modalButtonText}>
                       {isUpdating ? t('updating') : t('update')}
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      <Modal visible={showMouldModal} animationType="slide" transparent={true}>
+        <SafeAreaView style={styles.modalContainer}>
+          <ScrollView style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{t('change_status')}</Text>
+            {selectedMould && (
+              <>
+                <Text style={styles.modalMachineName}>{selectedMould.name}</Text>
+                <Text style={styles.modalLabel}>{t('new_status')}:</Text>
+                {(['active', 'standby', 'warning', 'needs_repair', 'under_repair'] as const).map((status) => (
+                  <Pressable
+                    key={status}
+                    style={[
+                      styles.statusOption,
+                      newMouldStatus === status && styles.statusOptionSelected,
+                    ]}
+                    onPress={() => setNewMouldStatus(status)}
+                  >
+                    <View style={[styles.statusOptionDot, { backgroundColor: getMouldStatusColor(status) }]} />
+                    <Text style={styles.statusOptionText}>{getMouldStatusLabel(status)}</Text>
+                  </Pressable>
+                ))}
+
+                {['warning', 'needs_repair'].includes(newMouldStatus) && (
+                  <>
+                    <Text style={styles.modalLabel}>{t('problem_description')}:</Text>
+                    <TextInput
+                      style={styles.problemInput}
+                      placeholder={t('problem_description_placeholder')}
+                      value={mouldProblemDescription}
+                      onChangeText={setMouldProblemDescription}
+                      multiline={true}
+                      numberOfLines={4}
+                    />
+                  </>
+                )}
+                <View style={styles.modalButtonGroup}>
+                  <Pressable
+                    style={[styles.modalButton, { backgroundColor: '#ef4444' }]}
+                    onPress={() => setShowMouldModal(false)}
+                    disabled={isMouldUpdating}
+                  >
+                    <Text style={styles.modalButtonText}>{t('cancel')}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.modalButton, { backgroundColor: '#22c55e' }]}
+                    onPress={updateMouldStatus}
+                    disabled={isMouldUpdating}
+                  >
+                    <Text style={styles.modalButtonText}>
+                      {isMouldUpdating ? t('updating') : t('update')}
                     </Text>
                   </Pressable>
                 </View>
