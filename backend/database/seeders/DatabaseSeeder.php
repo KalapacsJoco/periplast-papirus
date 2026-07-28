@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             MachineSeeder::class,
             MouldSeeder::class,
+            OrderSeeder::class,
         ]);
 
         // User::factory(10)->create();

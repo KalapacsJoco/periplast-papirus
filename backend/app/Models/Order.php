@@ -15,6 +15,9 @@ class Order extends Model
         'machine_id',
         'mould_id',
         'product_id',
+        'date',
+        'customer',
+        'quantity',
         'cycle_time',
         'net_weight',
         'gross_weight',
@@ -22,9 +25,12 @@ class Order extends Model
         'additives_percentages',
         'status',
         'pause_description',
+        'description',
     ];
 
     protected $casts = [
+        'date' => 'date',
+        'quantity' => 'integer',
         'cycle_time' => 'integer',
         'net_weight' => 'decimal:3',
         'gross_weight' => 'decimal:3',

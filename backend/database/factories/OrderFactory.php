@@ -25,6 +25,9 @@ class OrderFactory extends Factory
             'machine_id' => Machine::factory(),
             'mould_id' => Mould::factory(),
             'product_id' => Product::factory(),
+            'date' => fake()->dateTimeBetween('-5 days', '+10 days')->format('Y-m-d'),
+            'customer' => fake()->company(),
+            'quantity' => fake()->numberBetween(500, 20000),
             'cycle_time' => fake()->numberBetween(10000, 120000),
             'net_weight' => $netWeight,
             'gross_weight' => round($grossWeight, 3),
@@ -32,6 +35,7 @@ class OrderFactory extends Factory
             'additives_percentages' => $this->generateAdditivesPercentages(),
             'status' => fake()->randomElement(['waiting', 'in_progress', 'paused', 'completed']),
             'pause_description' => fake()->boolean(20) ? fake()->sentence() : null,
+            'description' => fake()->optional()->sentence(),
         ];
     }
 
