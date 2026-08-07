@@ -38,11 +38,26 @@ type Order = {
   customer?: string;
   quantity: number;
   current_quantity?: number;
+  good_quantity?: number;
+  bad_quantity?: number;
   started_at?: string | null;
+  ended_at?: string | null;
+  last_paused_at?: string | null;
   cycle_time: number | null;
   net_weight: string | number | null;
   gross_weight: string | number | null;
   color_percentage: string | number | null;
+  additives_percentages?: Array<{ additive_id: number; percentage: number }> | null;
+  production_protocol?: {
+    machine_name?: string | null;
+    part_code?: string | null;
+    material_code?: string | null;
+    color_code?: string | null;
+    color_percentage?: number | null;
+    additives?: string | null;
+    gross_weight?: number | null;
+    net_weight?: number | null;
+  } | null;
   status: string;
   machine?: { id: number; name: string; status?: string; problem_description?: string };
   mould?: { id: number; name: string; number: string; cavity_count?: number | null; status?: string; problem_description?: string };
@@ -79,6 +94,19 @@ type DashboardMachine = Machine & {
 type Screen = 'machines' | 'moulds' | 'products';
 type IssueTarget = 'machine' | 'mould' | 'product';
 
+type ProductionProtocolDraft = {
+  machine_name: string;
+  part_code: string;
+  material_code: string;
+  color_code: string;
+  color_percentage: string;
+  additives: string;
+  cycle_time: string;
+  quantity: string;
+  gross_weight: string;
+  net_weight: string;
+};
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const [currentScreen, setCurrentScreen] = useState<Screen>('machines');
@@ -90,7 +118,7 @@ export default function App() {
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [ordersLoaded, setOrdersLoaded] = useState(false);
-  const [productionDrafts, setProductionDrafts] = useState<Record<number, { cycle_time: string; quantity: string; current_quantity: string }>>({});
+  const [productionDrafts, setProductionDrafts] = useState<Record<number, { current_quantity: string }>>({});
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -98,6 +126,19 @@ export default function App() {
   const [newStatus, setNewStatus] = useState<string>('');
   const [problemDescription, setProblemDescription] = useState<string>('');
   const [isUpdating, setIsUpdating] = useState(false);
+  const [showProtocolModal, setShowProtocolModal] = useState(false);
+  const [protocolOrderId, setProtocolOrderId] = useState<number | null>(null);
+  const [protocolDraft, setProtocolDraft] = useState<ProductionProtocolDraft | null>(null);
+  const [isProtocolSaving, setIsProtocolSaving] = useState(false);
+  const [protocolPromptedOrderIds, setProtocolPromptedOrderIds] = useState<number[]>([]);
+  const [showMachineOrdersModal, setShowMachineOrdersModal] = useState(false);
+  const [machineOrdersMachine, setMachineOrdersMachine] = useState<DashboardMachine | null>(null);
+  const [activatingOrderId, setActivatingOrderId] = useState<number | null>(null);
+  const [showFinalizeModal, setShowFinalizeModal] = useState(false);
+  const [finalizeOrderId, setFinalizeOrderId] = useState<number | null>(null);
+  const [finalizeStatus, setFinalizeStatus] = useState<'completed' | 'interrupted'>('completed');
+  const [finalizeGoodQuantity, setFinalizeGoodQuantity] = useState('0');
+  const [finalizeBadQuantity, setFinalizeBadQuantity] = useState('0');
 
   // Moulds state
   const [moulds, setMoulds] = useState<Mould[]>([]);
@@ -172,8 +213,6 @@ export default function App() {
         data.forEach((order) => {
           if (!next[order.id]) {
             next[order.id] = {
-              cycle_time: String(order.cycle_time ?? ''),
-              quantity: String(order.quantity ?? ''),
               current_quantity: String(order.current_quantity ?? 0),
             };
           }
@@ -234,6 +273,7 @@ export default function App() {
         if (!response.ok) throw new Error(`${t('error')}: ${response.status}`);
         const updated = (await response.json()) as Machine;
         setMachines(machines.map(m => (m.id === updated.id ? updated : m)));
+        await loadOrders();
       } else if (issueTarget === 'mould') {
         const mouldId = selectedMachine.currentOrder?.mould_id;
         if (!mouldId) throw new Error(t('unknown_error'));
@@ -248,6 +288,7 @@ export default function App() {
         const updated = (await response.json()) as Mould;
         setOrders(orders.map(order => order.mould_id === updated.id ? { ...order, mould: { ...updated } } : order));
         setMoulds(moulds.map(m => (m.id === updated.id ? updated : m)));
+        await loadOrders();
       } else {
         const productId = selectedMachine.currentOrder?.product_id;
         if (!productId) throw new Error(t('unknown_error'));
@@ -396,13 +437,11 @@ export default function App() {
 
   const getProductionDraft = (order: Order) => {
     return productionDrafts[order.id] ?? {
-      cycle_time: String(order.cycle_time ?? ''),
-      quantity: String(order.quantity ?? ''),
       current_quantity: String(order.current_quantity ?? 0),
     };
   };
 
-  const updateProductionDraft = (orderId: number, field: 'cycle_time' | 'quantity' | 'current_quantity', value: string) => {
+  const updateProductionDraft = (orderId: number, field: 'current_quantity', value: string) => {
     setProductionDrafts((current) => ({
       ...current,
       [orderId]: {
@@ -410,6 +449,111 @@ export default function App() {
         [field]: value,
       },
     }));
+  };
+
+  const hasProtocolData = (order: Order) => {
+    const protocol = order.production_protocol;
+    if (!protocol) return false;
+
+    return Boolean(
+      protocol.part_code ||
+      protocol.material_code ||
+      protocol.color_code ||
+      protocol.additives ||
+      protocol.gross_weight != null ||
+      protocol.net_weight != null
+    );
+  };
+
+  const buildProtocolDraft = (order: Order): ProductionProtocolDraft => {
+    const protocol = order.production_protocol ?? null;
+
+    return {
+      machine_name: protocol?.machine_name ?? order.machine?.name ?? '',
+      part_code: protocol?.part_code ?? order.product?.code ?? '',
+      material_code: protocol?.material_code ?? '',
+      color_code: protocol?.color_code ?? '',
+      color_percentage: protocol?.color_percentage != null ? String(protocol.color_percentage) : (order.color_percentage != null ? String(order.color_percentage) : ''),
+      additives: protocol?.additives ?? '',
+      cycle_time: protocol?.cycle_time != null ? String(protocol.cycle_time) : String(order.cycle_time ?? ''),
+      quantity: protocol?.quantity != null ? String(protocol.quantity) : String(order.quantity ?? ''),
+      gross_weight: protocol?.gross_weight != null ? String(protocol.gross_weight) : (order.gross_weight != null ? String(order.gross_weight) : ''),
+      net_weight: protocol?.net_weight != null ? String(protocol.net_weight) : (order.net_weight != null ? String(order.net_weight) : ''),
+    };
+  };
+
+  const openProtocolModal = (order: Order) => {
+    setProtocolOrderId(order.id);
+    setProtocolDraft(buildProtocolDraft(order));
+    setShowProtocolModal(true);
+  };
+
+  useEffect(() => {
+    if (showProtocolModal) return;
+
+    const candidate = orders.find(
+      (order) =>
+        order.status === 'in_progress'
+        && !hasProtocolData(order)
+        && !protocolPromptedOrderIds.includes(order.id)
+    );
+
+    if (candidate) {
+      setProtocolPromptedOrderIds((current) => [...current, candidate.id]);
+      openProtocolModal(candidate);
+    }
+  }, [orders, showProtocolModal, protocolPromptedOrderIds]);
+
+  const saveProductionProtocol = async () => {
+    if (!protocolOrderId || !protocolDraft) return;
+
+    const colorPercentage = protocolDraft.color_percentage.trim() === '' ? null : Number(protocolDraft.color_percentage);
+    const cycleTime = protocolDraft.cycle_time.trim() === '' ? null : Number(protocolDraft.cycle_time);
+    const quantity = protocolDraft.quantity.trim() === '' ? null : Number(protocolDraft.quantity);
+    const grossWeight = protocolDraft.gross_weight.trim() === '' ? null : Number(protocolDraft.gross_weight);
+    const netWeight = protocolDraft.net_weight.trim() === '' ? null : Number(protocolDraft.net_weight);
+
+    if (
+      (colorPercentage != null && Number.isNaN(colorPercentage)) ||
+      (cycleTime != null && Number.isNaN(cycleTime)) ||
+      (quantity != null && Number.isNaN(quantity)) ||
+      (grossWeight != null && Number.isNaN(grossWeight)) ||
+      (netWeight != null && Number.isNaN(netWeight))
+    ) {
+      Alert.alert(t('error'), t('unknown_error'));
+      return;
+    }
+
+    setIsProtocolSaving(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/orders/${protocolOrderId}/protocol`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          machine_name: protocolDraft.machine_name || null,
+          part_code: protocolDraft.part_code || null,
+          material_code: protocolDraft.material_code || null,
+          color_code: protocolDraft.color_code || null,
+          color_percentage: colorPercentage,
+          additives: protocolDraft.additives || null,
+          cycle_time: cycleTime,
+          quantity,
+          gross_weight: grossWeight,
+          net_weight: netWeight,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`${t('error')}: ${response.status}`);
+
+      const updated = (await response.json()) as Order;
+      setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setShowProtocolModal(false);
+      Alert.alert(t('success'), t('production_protocol_saved'));
+    } catch (error) {
+      Alert.alert(t('error'), error instanceof Error ? error.message : t('unknown_error'));
+    } finally {
+      setIsProtocolSaving(false);
+    }
   };
 
   const isWorkingTime = (date: Date) => {
@@ -515,11 +659,9 @@ export default function App() {
 
   const saveProductionData = async (order: Order) => {
     const draft = getProductionDraft(order);
-    const cycleTime = Number(draft.cycle_time);
-    const quantity = Number(draft.quantity);
     const currentQuantity = Number(draft.current_quantity);
 
-    if (!cycleTime || !quantity || currentQuantity < 0) {
+    if (currentQuantity < 0) {
       Alert.alert(t('error'), t('unknown_error'));
       return;
     }
@@ -529,8 +671,6 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          cycle_time: cycleTime,
-          quantity,
           current_quantity: currentQuantity,
         }),
       });
@@ -542,25 +682,94 @@ export default function App() {
       setProductionDrafts((current) => ({
         ...current,
         [updated.id]: {
-          cycle_time: String(updated.cycle_time ?? ''),
-          quantity: String(updated.quantity ?? ''),
           current_quantity: String(updated.current_quantity ?? 0),
         },
       }));
       Alert.alert(t('success'), t('production_data_saved'));
+
+      if (updated.status === 'in_progress' && !hasProtocolData(updated)) {
+        openProtocolModal(updated);
+      }
     } catch (error) {
       Alert.alert(t('error'), error instanceof Error ? error.message : t('unknown_error'));
     }
   };
 
+  const updateOrderStatus = async (order: Order, status: 'paused' | 'completed' | 'interrupted', goodQuantity?: number, badQuantity?: number) => {
+    try {
+      const payload: Record<string, string | number | null> = {
+        status,
+      };
+
+      if (status === 'paused') {
+        payload.pause_description = t('order_paused_from_dashboard');
+      }
+
+      if (status === 'completed' || status === 'interrupted') {
+        payload.good_quantity = goodQuantity ?? Number(getProductionDraft(order).current_quantity || 0);
+        payload.bad_quantity = badQuantity ?? 0;
+      }
+
+      const response = await fetch(`${apiBaseUrl}/api/orders/${order.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) throw new Error(`${t('error')}: ${response.status}`);
+
+      const updated = (await response.json()) as Order;
+      setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setProductionDrafts((current) => ({
+        ...current,
+        [updated.id]: {
+          current_quantity: String(updated.current_quantity ?? 0),
+        },
+      }));
+      Alert.alert(t('success'), t('order_status_updated'));
+    } catch (error) {
+      Alert.alert(t('error'), error instanceof Error ? error.message : t('unknown_error'));
+    }
+  };
+
+  const openFinalizeModal = (order: Order, status: 'completed' | 'interrupted') => {
+    const draft = getProductionDraft(order);
+    const current = Number(draft.current_quantity || 0);
+    setFinalizeOrderId(order.id);
+    setFinalizeStatus(status);
+    setFinalizeGoodQuantity(String(Number.isFinite(current) ? current : 0));
+    setFinalizeBadQuantity('0');
+    setShowFinalizeModal(true);
+  };
+
+  const submitFinalizeStatus = async () => {
+    if (!finalizeOrderId) return;
+
+    const order = orders.find((item) => item.id === finalizeOrderId);
+    if (!order) return;
+
+    const good = Number(finalizeGoodQuantity);
+    const bad = Number(finalizeBadQuantity);
+
+    if (!Number.isFinite(good) || !Number.isFinite(bad) || good < 0 || bad < 0) {
+      Alert.alert(t('error'), t('unknown_error'));
+      return;
+    }
+
+    await updateOrderStatus(order, finalizeStatus, good, bad);
+    setShowFinalizeModal(false);
+  };
+
   const getOrderTracking = (
     order: Order,
-    draft?: { cycle_time: string; quantity: string; current_quantity: string }
+    draft?: { current_quantity: string }
   ) => {
     const startedAt = order.started_at ? new Date(order.started_at) : null;
+    const endedAt = order.ended_at ? new Date(order.ended_at) : null;
+    const pausedAt = order.last_paused_at ? new Date(order.last_paused_at) : null;
     const mouldCount = order.mould?.cavity_count ?? 1;
-    const draftQuantity = Number(draft?.quantity ?? order.quantity ?? 0);
-    const draftCycleTime = Number(draft?.cycle_time ?? order.cycle_time ?? 0);
+    const draftQuantity = Number(order.quantity ?? 0);
+    const draftCycleTime = Number(order.cycle_time ?? 0);
     const draftCurrentQuantity = Number(draft?.current_quantity ?? order.current_quantity ?? 0);
     const totalPieces = Math.max(1, Number.isFinite(draftQuantity) ? draftQuantity : Number(order.quantity ?? 0));
     const totalCycles = Math.max(1, Math.ceil(totalPieces / Math.max(1, mouldCount)));
@@ -574,11 +783,17 @@ export default function App() {
     const remainingCycles = Math.max(0, Math.ceil(remainingPieces / Math.max(1, mouldCount)));
     const remainingSeconds = remainingCycles * cycleTime;
     const now = new Date();
-    const elapsedSeconds = startedAt ? workingSecondsBetween(startedAt, now) : 0;
+    const trackingReference =
+      order.status === 'completed'
+        ? (endedAt ?? now)
+        : (order.status === 'paused' || order.status === 'interrupted')
+          ? (pausedAt ?? now)
+          : now;
+    const elapsedSeconds = startedAt ? workingSecondsBetween(startedAt, trackingReference) : 0;
     const theoreticalProgress = Math.min(1, totalSeconds > 0 ? elapsedSeconds / totalSeconds : 0);
     const actualProgress = Math.min(1, totalPieces > 0 ? currentPieces / totalPieces : 0);
     const theoreticalEta = startedAt ? addWorkingSeconds(startedAt, totalSeconds) : null;
-    const actualEta = startedAt ? addWorkingSeconds(now, remainingSeconds) : null;
+    const actualEta = startedAt ? addWorkingSeconds(trackingReference, remainingSeconds) : null;
     const delaySeconds = theoreticalEta && actualEta ? Math.max(0, (actualEta.getTime() - theoreticalEta.getTime()) / 1000) : 0;
 
     return {
@@ -697,6 +912,62 @@ export default function App() {
       case 'warning': return t('status_warning');
       case 'broken': return t('status_broken');
       default: return status;
+    }
+  };
+
+  const getOrderStatusLabel = (status: string) => {
+    switch (status) {
+      case 'in_progress':
+        return t('order_status_in_progress');
+      case 'paused':
+        return t('order_status_paused');
+      case 'completed':
+        return t('order_status_completed');
+      case 'interrupted':
+        return t('order_status_interrupted');
+      case 'waiting':
+        return t('order_status_waiting');
+      default:
+        return status;
+    }
+  };
+
+  const openMachineOrdersModal = (machine: DashboardMachine) => {
+    setMachineOrdersMachine(machine);
+    setShowMachineOrdersModal(true);
+  };
+
+  const getMachineOrders = (machineId: number) => {
+    return orders
+      .filter((order) => order.machine_id === machineId)
+      .sort((a, b) => a.order_number.localeCompare(b.order_number));
+  };
+
+  const activateOrder = async (order: Order) => {
+    setActivatingOrderId(order.id);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/orders/${order.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'in_progress',
+        }),
+      });
+
+      if (!response.ok) throw new Error(`${t('error')}: ${response.status}`);
+
+      const updated = (await response.json()) as Order;
+      setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setShowMachineOrdersModal(false);
+      Alert.alert(t('success'), t('order_status_updated'));
+
+      if (!hasProtocolData(updated)) {
+        openProtocolModal(updated);
+      }
+    } catch (error) {
+      Alert.alert(t('error'), error instanceof Error ? error.message : t('unknown_error'));
+    } finally {
+      setActivatingOrderId(null);
     }
   };
 
@@ -852,19 +1123,10 @@ export default function App() {
                   {t('order_number')}: {item.currentOrder.order_number}
                 </Text>
                 <Text style={styles.machineMeta}>
-                  {t('started_at')}: {formatEta(item.currentOrder.started_at ? new Date(item.currentOrder.started_at) : null)}
-                </Text>
-                <Text style={styles.machineMeta}>
-                  {t('product')}: {item.currentOrder.product?.name ?? '-'}
-                </Text>
-                <Text style={styles.machineMeta}>
-                  {t('mould')}: {item.currentOrder.mould?.name ?? '-'}
-                </Text>
-                <Text style={styles.machineMeta}>
-                  {t('cycle_time_seconds')}: {item.currentOrder.cycle_time ?? '-'}
-                </Text>
-                <Text style={styles.machineMeta}>
                   {t('total_quantity')}: {item.currentOrder.quantity}
+                </Text>
+                <Text style={styles.machineMeta}>
+                  {t('started_at')}: {formatEta(item.currentOrder.started_at ? new Date(item.currentOrder.started_at) : null)}
                 </Text>
 
                 {(() => {
@@ -874,24 +1136,6 @@ export default function App() {
                   return (
                     <>
                       <View style={styles.productionInputsRow}>
-                        <View style={styles.productionInputBlock}>
-                          <Text style={styles.productionLabel}>{t('cycle_time_seconds')}</Text>
-                          <TextInput
-                            style={styles.productionInput}
-                            keyboardType="numeric"
-                            value={draft.cycle_time}
-                            onChangeText={(value) => updateProductionDraft(item.currentOrder.id, 'cycle_time', value)}
-                          />
-                        </View>
-                        <View style={styles.productionInputBlock}>
-                          <Text style={styles.productionLabel}>{t('total_quantity')}</Text>
-                          <TextInput
-                            style={styles.productionInput}
-                            keyboardType="numeric"
-                            value={draft.quantity}
-                            onChangeText={(value) => updateProductionDraft(item.currentOrder.id, 'quantity', value)}
-                          />
-                        </View>
                         <View style={styles.productionInputBlock}>
                           <Text style={styles.productionLabel}>{t('current_quantity')}</Text>
                           <TextInput
@@ -909,6 +1153,35 @@ export default function App() {
                       >
                         <Text style={styles.actionButtonText}>{t('save_production_data')}</Text>
                       </Pressable>
+
+                      <Pressable
+                        style={[styles.actionButton, styles.protocolButton]}
+                        onPress={() => openProtocolModal(item.currentOrder!)}
+                      >
+                        <Text style={styles.actionButtonText}>{t('production_protocol')}</Text>
+                      </Pressable>
+
+                      <Text style={styles.productionLabel}>{t('order_status_actions')}</Text>
+                      <View style={styles.orderStatusButtonsRow}>
+                        <Pressable
+                          style={[styles.orderStatusButton, styles.orderPausedButton]}
+                          onPress={() => updateOrderStatus(item.currentOrder!, 'paused')}
+                        >
+                          <Text style={styles.actionButtonText}>{t('order_status_paused')}</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.orderStatusButton, styles.orderCompletedButton]}
+                          onPress={() => openFinalizeModal(item.currentOrder!, 'completed')}
+                        >
+                          <Text style={styles.actionButtonText}>{t('order_status_completed')}</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.orderStatusButton, styles.orderInterruptedButton]}
+                          onPress={() => openFinalizeModal(item.currentOrder!, 'interrupted')}
+                        >
+                          <Text style={styles.actionButtonText}>{t('order_status_interrupted')}</Text>
+                        </Pressable>
+                      </View>
 
                       <View style={styles.progressGroup}>
                         <Text style={styles.progressLabel}>{t('theoretical_progress')} + {t('actual_progress')}</Text>
@@ -960,6 +1233,13 @@ export default function App() {
                 {t('problem')}: {item.problem_description}
               </Text>
             )}
+
+            <Pressable
+              style={[styles.actionButton, styles.moreOrdersButton]}
+              onPress={() => openMachineOrdersModal(item)}
+            >
+              <Text style={styles.actionButtonText}>{t('more_orders')}</Text>
+            </Pressable>
           </View>
         )}
         contentContainerStyle={styles.listContent}
@@ -1213,6 +1493,204 @@ export default function App() {
               </>
             )}
           </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      <Modal visible={showProtocolModal} animationType="slide" transparent={true}>
+        <SafeAreaView style={styles.modalContainer}>
+          <ScrollView style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{t('production_protocol')}</Text>
+
+            {protocolDraft && (
+              <>
+                <Text style={styles.modalLabel}>{t('machine_name')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  value={protocolDraft.machine_name}
+                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, machine_name: value } : current))}
+                />
+
+                <Text style={styles.modalLabel}>{t('part_code')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  value={protocolDraft.part_code}
+                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, part_code: value } : current))}
+                />
+
+                <Text style={styles.modalLabel}>{t('material_code')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  value={protocolDraft.material_code}
+                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, material_code: value } : current))}
+                />
+
+                <Text style={styles.modalLabel}>{t('color_code_optional')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  value={protocolDraft.color_code}
+                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, color_code: value } : current))}
+                />
+
+                <Text style={styles.modalLabel}>{t('color_percentage_optional')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  keyboardType="numeric"
+                  value={protocolDraft.color_percentage}
+                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, color_percentage: value } : current))}
+                />
+
+                <Text style={styles.modalLabel}>{t('additives_codes_percentages_optional')}</Text>
+                <TextInput
+                  style={styles.problemInput}
+                  value={protocolDraft.additives}
+                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, additives: value } : current))}
+                  multiline={true}
+                  numberOfLines={4}
+                />
+
+                <Text style={styles.modalLabel}>{t('cycle_time_seconds')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  keyboardType="numeric"
+                  value={protocolDraft.cycle_time}
+                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, cycle_time: value } : current))}
+                />
+
+                <Text style={styles.modalLabel}>{t('total_quantity')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  keyboardType="numeric"
+                  value={protocolDraft.quantity}
+                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, quantity: value } : current))}
+                />
+
+                <Text style={styles.modalLabel}>{t('gross_weight_optional')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  keyboardType="numeric"
+                  value={protocolDraft.gross_weight}
+                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, gross_weight: value } : current))}
+                />
+
+                <Text style={styles.modalLabel}>{t('net_weight')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  keyboardType="numeric"
+                  value={protocolDraft.net_weight}
+                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, net_weight: value } : current))}
+                />
+
+                <View style={styles.modalButtonGroup}>
+                  <Pressable
+                    style={[styles.modalButton, { backgroundColor: '#ef4444' }]}
+                    onPress={() => setShowProtocolModal(false)}
+                    disabled={isProtocolSaving}
+                  >
+                    <Text style={styles.modalButtonText}>{t('cancel')}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.modalButton, { backgroundColor: '#22c55e' }]}
+                    onPress={saveProductionProtocol}
+                    disabled={isProtocolSaving}
+                  >
+                    <Text style={styles.modalButtonText}>
+                      {isProtocolSaving ? t('updating') : t('save')}
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      <Modal visible={showMachineOrdersModal} animationType="slide" transparent={true}>
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{t('more_orders')}</Text>
+            <Text style={styles.modalMachineName}>{machineOrdersMachine?.name ?? ''}</Text>
+
+            {machineOrdersMachine && getMachineOrders(machineOrdersMachine.id).length === 0 ? (
+              <Text style={styles.emptyText}>{t('no_orders_for_machine')}</Text>
+            ) : (
+              <ScrollView>
+                {machineOrdersMachine && getMachineOrders(machineOrdersMachine.id).map((order) => (
+                  <View key={order.id} style={styles.machineOrderListItem}>
+                    <Text style={styles.machineName}>{order.order_number}</Text>
+                    <Text style={styles.machineMeta}>{t('status')}: {getOrderStatusLabel(order.status)}</Text>
+                    <Text style={styles.machineMeta}>{t('started_at')}: {formatEta(order.started_at ? new Date(order.started_at) : null)}</Text>
+                    <Text style={styles.machineMeta}>{t('ended_at')}: {formatEta(order.ended_at ? new Date(order.ended_at) : null)}</Text>
+                    <Text style={styles.machineMeta}>{t('total_quantity')}: {order.quantity}</Text>
+
+                    {order.status !== 'in_progress' ? (
+                      <Pressable
+                        style={[styles.actionButton, styles.orderActivateButton]}
+                        onPress={() => activateOrder(order)}
+                        disabled={activatingOrderId === order.id}
+                      >
+                        <Text style={styles.actionButtonText}>
+                          {activatingOrderId === order.id ? t('updating') : t('activate_order')}
+                        </Text>
+                      </Pressable>
+                    ) : (
+                      <View style={[styles.actionButton, styles.orderActiveBadge]}>
+                        <Text style={styles.actionButtonText}>{t('order_status_in_progress')}</Text>
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
+            <Pressable
+              style={[styles.modalButton, { backgroundColor: '#ef4444', marginTop: 12 }]}
+              onPress={() => setShowMachineOrdersModal(false)}
+            >
+              <Text style={styles.modalButtonText}>{t('cancel')}</Text>
+            </Pressable>
+          </View>
+        </SafeAreaView>
+      </Modal>
+
+      <Modal visible={showFinalizeModal} animationType="slide" transparent={true}>
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              {finalizeStatus === 'completed' ? t('order_status_completed') : t('order_status_interrupted')}
+            </Text>
+            <Text style={styles.modalMachineName}>{t('finalize_order_quantities')}</Text>
+
+            <Text style={styles.modalLabel}>{t('good_quantity')}</Text>
+            <TextInput
+              style={styles.productionInput}
+              keyboardType="numeric"
+              value={finalizeGoodQuantity}
+              onChangeText={setFinalizeGoodQuantity}
+            />
+
+            <Text style={styles.modalLabel}>{t('bad_quantity')}</Text>
+            <TextInput
+              style={styles.productionInput}
+              keyboardType="numeric"
+              value={finalizeBadQuantity}
+              onChangeText={setFinalizeBadQuantity}
+            />
+
+            <View style={styles.modalButtonGroup}>
+              <Pressable
+                style={[styles.modalButton, { backgroundColor: '#ef4444' }]}
+                onPress={() => setShowFinalizeModal(false)}
+              >
+                <Text style={styles.modalButtonText}>{t('cancel')}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButton, { backgroundColor: '#22c55e' }]}
+                onPress={submitFinalizeStatus}
+              >
+                <Text style={styles.modalButtonText}>{t('save')}</Text>
+              </Pressable>
+            </View>
+          </View>
         </SafeAreaView>
       </Modal>
 
@@ -1586,6 +2064,56 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     minWidth: 200,
     backgroundColor: '#0f766e',
+  },
+  protocolButton: {
+    marginTop: 8,
+    flex: 0,
+    alignSelf: 'flex-start',
+    minWidth: 200,
+    backgroundColor: '#0369a1',
+  },
+  moreOrdersButton: {
+    marginTop: 10,
+    backgroundColor: '#475569',
+  },
+  orderStatusButtonsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  orderStatusButton: {
+    flexGrow: 1,
+    minWidth: 110,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  orderPausedButton: {
+    backgroundColor: '#334155',
+  },
+  orderCompletedButton: {
+    backgroundColor: '#15803d',
+  },
+  orderInterruptedButton: {
+    backgroundColor: '#b91c1c',
+  },
+  machineOrderListItem: {
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    marginBottom: 10,
+  },
+  orderActivateButton: {
+    backgroundColor: '#0f766e',
+    marginTop: 8,
+  },
+  orderActiveBadge: {
+    backgroundColor: '#15803d',
+    marginTop: 8,
   },
   buttonGroup: {
     flexDirection: 'row',
