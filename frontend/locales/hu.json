@@ -142,5 +142,9 @@
   "home": "Főoldal",
   "language": "Nyelv",
   "hungarian": "Magyar",
-  "german": "Német"
+  "german": "Német",
+  "readme_button_label": "README",
+  "readme_title": "Alkalmazás ismertető",
+  "readme_intro": "Ez az alkalmazás a gyártás és a gépkezelés támogatására készült. Az alábbiakban összefoglaljuk, hogyan működik és mire használható a rendszer jelenleg.",
+  "readme_close": "Bezárás"
 }

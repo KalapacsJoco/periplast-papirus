@@ -152,6 +152,7 @@ export default function App() {
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showReadmeModal, setShowReadmeModal] = useState(false);
   const [issueTarget, setIssueTarget] = useState<IssueTarget>('machine');
   const [newStatus, setNewStatus] = useState<string>('');
   const [problemDescription, setProblemDescription] = useState<string>('');
@@ -1336,6 +1337,73 @@ export default function App() {
     ? orders.find((item) => item.id === protocolOrderId) ?? null
     : null;
 
+  const readmeSections =
+    i18n.language === 'hu'
+      ? [
+          {
+            title: 'Mi ez az alkalmazás?',
+            body:
+              'A Papirus egy gyártási és gépkezelő rendszer fröccsöntési üzemekhez. Célja, hogy a gépek állapotát, a megrendelőket, a szerszámokat és a minőségi ellenőrzéseket egyszerűen és gyorsan lehessen nyomon követni.',
+          },
+          {
+            title: 'Gépek és megrendelők kezelése',
+            body:
+              'A főképernyőn látjuk az összes gépet és az aktív megrendelőt. Lehetőség van a gép státuszának módosítására, a hibajelentésre, a megrendelő aktiválására és a gyártási előrehaladás nyomon követésére.',
+          },
+          {
+            title: 'Termelési protokoll és nyomon követés',
+            body:
+              'Minden aktív rendelésnél látszik a teljes mennyiség, a jelenlegi darabszám, az elméleti és tényleges haladás, a becsült befejezés és a késés. A protokollban rögzíthetők a gyártási adatok és a műveleti megjegyzések.',
+          },
+          {
+            title: 'Minőségellenőrzés',
+            body:
+              'A rendszer támogatja a minőségellenőrzést. Lehetőség van a minőségi státusz beállítására, hibatípus kiválasztására, megoldási megjegyzés rögzítésére és a következő lépés meghatározására, például figyelmeztetés vagy leállítás.',
+          },
+          {
+            title: 'Szerszámok és termékadatok',
+            body:
+              'A szerszámok menüben nyomon követhetők a szerszámok állapotai és problémái. A termékek menüben megjelenik a cikkszám, anyag, szín, adalékanyagok és kompatibilis szerszámok összes információja.',
+          },
+          {
+            title: 'Nyelvek és felhasználói élmény',
+            body:
+              'Az alkalmazás magyar és német nyelven is használható. A főmenüben a nyelv könnyen váltatható, így a főműveletek érthetőek maradnak a gyár különböző munkatársai számára.',
+          },
+        ]
+      : [
+          {
+            title: 'Was ist diese App?',
+            body:
+              'Papirus ist ein Produktions- und Maschinenmanagementsystem für Spritzgießbetriebe. Ziel ist es, Maschinenstatus, Aufträge, Werkzeuge und Qualitätsprüfungen einfach und schnell zu überwachen.',
+          },
+          {
+            title: 'Maschinen- und Auftragsverwaltung',
+            body:
+              'Auf dem Hauptbildschirm werden alle Maschinen und der aktuelle Auftrag angezeigt. Es ist möglich, den Maschinenstatus zu ändern, Fehler zu melden, Aufträge zu aktivieren und den Produktionsfortschritt zu verfolgen.',
+          },
+          {
+            title: 'Produktionsprotokoll und Verfolgung',
+            body:
+              'Für jeden aktiven Auftrag sind Gesamtmenge, aktuelle Stückzahl, theoretischer und tatsächlicher Fortschritt, geschätztes Ende und Verzögerung sichtbar. Im Protokoll können Produktionsdaten und Betriebsnotizen erfasst werden.',
+          },
+          {
+            title: 'Qualitätskontrolle',
+            body:
+              'Das System unterstützt Qualitätsprüfungen. Es kann ein Qualitätsstatus gesetzt, ein Fehler typisiert, eine Lösung dokumentiert und der nächste Schritt festgelegt werden, z. B. Warnung oder Stopp.',
+          },
+          {
+            title: 'Werkzeuge und Produktdaten',
+            body:
+              'Im Werkzeugmenü werden Status und Probleme der Werkzeuge überwacht. Im Produktmenü erscheinen Artikelnummer, Material, Farbe, Additive und kompatible Werkzeuge mit allen relevanten Informationen.',
+          },
+          {
+            title: 'Sprachen und Benutzerfreundlichkeit',
+            body:
+              'Die App kann auf Ungarisch und Deutsch genutzt werden. Im Hauptmenü lässt sich die Sprache schnell wechseln, damit die wichtigsten Funktionen für verschiedene Mitarbeiter verständlich bleiben.',
+          },
+        ];
+
   const Navbar = () => (
     <View style={styles.navbar}>
       <View style={styles.navTitleGroup}>
@@ -1711,8 +1779,41 @@ export default function App() {
             >
               <Text style={styles.menuItemText}>{t('products_button_label')}</Text>
             </Pressable>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setShowMenu(false);
+                setShowReadmeModal(true);
+              }}
+            >
+              <Text style={styles.menuItemText}>{t('readme_button_label')}</Text>
+            </Pressable>
           </View>
         </Pressable>
+      </Modal>
+
+      <Modal visible={showReadmeModal} animationType="slide" transparent={true}>
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.readmeContainer}>
+            <View style={styles.readmeHeader}>
+              <Text style={styles.modalTitle}>{t('readme_title')}</Text>
+              <Pressable style={styles.closeButton} onPress={() => setShowReadmeModal(false)}>
+                <Text style={styles.closeButtonText}>{t('readme_close')}</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.readmeScroll} contentContainerStyle={styles.readmeContent}>
+              <Text style={styles.readmeIntroText}>{t('readme_intro')}</Text>
+
+              {readmeSections.map((section) => (
+                <View key={section.title} style={styles.readmeSection}>
+                  <Text style={styles.readmeSectionTitle}>{section.title}</Text>
+                  <Text style={styles.readmeSectionText}>{section.body}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </SafeAreaView>
       </Modal>
 
       <Modal visible={showModal} animationType="slide" transparent={true}>
@@ -2917,6 +3018,68 @@ const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  readmeContainer: {
+    backgroundColor: '#ffffff',
+    margin: 16,
+    borderRadius: 18,
+    overflow: 'hidden',
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#dfe7f1',
+  },
+  readmeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#ecfeff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#d0f2f5',
+  },
+  readmeScroll: {
+    flex: 1,
+  },
+  readmeContent: {
+    padding: 16,
+    paddingBottom: 24,
+  },
+  readmeIntroText: {
+    fontSize: 14,
+    color: '#475569',
+    lineHeight: 22,
+    marginBottom: 12,
+  },
+  readmeSection: {
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  readmeSectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 6,
+  },
+  readmeSectionText: {
+    fontSize: 14,
+    color: '#334155',
+    lineHeight: 22,
+  },
+  closeButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#0f766e',
+  },
+  closeButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   modalContent: {
     backgroundColor: '#ffffff',

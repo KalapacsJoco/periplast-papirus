@@ -142,5 +142,9 @@
   "home": "Startseite",
   "language": "Sprache",
   "hungarian": "Ungarisch",
-  "german": "Deutsch"
+  "german": "Deutsch",
+  "readme_button_label": "README",
+  "readme_title": "App-Übersicht",
+  "readme_intro": "Diese App wurde für die Unterstützung der Produktion und Maschinenverwaltung entwickelt. Im Folgenden wird kurz erklärt, wie sie funktioniert und was sie aktuell kann.",
+  "readme_close": "Schließen"
 }
