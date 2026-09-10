@@ -55,8 +55,14 @@ type Order = {
     color_code?: string | null;
     color_percentage?: number | null;
     additives?: string | null;
+    cycle_time?: number | null;
+    quantity?: number | null;
     gross_weight?: number | null;
     net_weight?: number | null;
+    quality_status?: 'good' | 'warning' | 'quality_issue' | null;
+    last_quality_check_at?: string | null;
+    quality_checks?: QualityCheckEntry[] | null;
+    entries?: ProtocolEntry[] | null;
   } | null;
   status: string;
   machine?: { id: number; name: string; status?: string; problem_description?: string };
@@ -107,6 +113,30 @@ type ProductionProtocolDraft = {
   net_weight: string;
 };
 
+type QualityStatus = 'good' | 'warning' | 'quality_issue';
+
+type QualityFollowUpStatus = 'warning' | 'stopped';
+
+type QualityCheckEntry = {
+  checked_at: string;
+  quality_status: QualityStatus;
+  protocol_entry: string;
+  current_quantity?: number;
+  problem_type?: string | null;
+  problem_note?: string | null;
+  follow_up_status?: QualityFollowUpStatus | null;
+  resolved_from_status?: QualityStatus | null;
+  resolution_note?: string | null;
+};
+
+type ProtocolEntry = {
+  timestamp: string;
+  entry_type: string;
+  current_quantity: number;
+  note?: string | null;
+  meta?: Record<string, string | number | null> | null;
+};
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const [currentScreen, setCurrentScreen] = useState<Screen>('machines');
@@ -129,6 +159,10 @@ export default function App() {
   const [showProtocolModal, setShowProtocolModal] = useState(false);
   const [protocolOrderId, setProtocolOrderId] = useState<number | null>(null);
   const [protocolDraft, setProtocolDraft] = useState<ProductionProtocolDraft | null>(null);
+  const [isProtocolEditMode, setIsProtocolEditMode] = useState(false);
+  const [showProtocolProductData, setShowProtocolProductData] = useState(false);
+  const [showProtocolStatusActions, setShowProtocolStatusActions] = useState(false);
+  const [protocolEntryCurrentQuantity, setProtocolEntryCurrentQuantity] = useState('0');
   const [isProtocolSaving, setIsProtocolSaving] = useState(false);
   const [protocolPromptedOrderIds, setProtocolPromptedOrderIds] = useState<number[]>([]);
   const [showMachineOrdersModal, setShowMachineOrdersModal] = useState(false);
@@ -136,9 +170,20 @@ export default function App() {
   const [activatingOrderId, setActivatingOrderId] = useState<number | null>(null);
   const [showFinalizeModal, setShowFinalizeModal] = useState(false);
   const [finalizeOrderId, setFinalizeOrderId] = useState<number | null>(null);
-  const [finalizeStatus, setFinalizeStatus] = useState<'completed' | 'interrupted'>('completed');
+  const [finalizeStatus, setFinalizeStatus] = useState<'paused' | 'completed' | 'interrupted'>('completed');
+  const [finalizeCurrentQuantity, setFinalizeCurrentQuantity] = useState('0');
   const [finalizeGoodQuantity, setFinalizeGoodQuantity] = useState('0');
   const [finalizeBadQuantity, setFinalizeBadQuantity] = useState('0');
+  const [showQualityModal, setShowQualityModal] = useState(false);
+  const [qualityOrderId, setQualityOrderId] = useState<number | null>(null);
+  const [qualityStatus, setQualityStatus] = useState<QualityStatus>('good');
+  const [qualityCurrentQuantity, setQualityCurrentQuantity] = useState('0');
+  const [qualityProblemType, setQualityProblemType] = useState<string>('surface_defect');
+  const [qualityProblemNote, setQualityProblemNote] = useState('');
+  const [qualityResolutionNote, setQualityResolutionNote] = useState('');
+  const [qualityFollowUpStatus, setQualityFollowUpStatus] = useState<QualityFollowUpStatus>('warning');
+  const [isQualitySaving, setIsQualitySaving] = useState(false);
+  const [issueCurrentQuantity, setIssueCurrentQuantity] = useState('0');
 
   // Moulds state
   const [moulds, setMoulds] = useState<Mould[]>([]);
@@ -175,6 +220,207 @@ export default function App() {
     loadMachines();
     loadOrders();
   }, []);
+
+  const qualityProblemOptions = [
+    'surface_defect',
+    'dimension_issue',
+    'color_issue',
+    'material_issue',
+    'burn_mark',
+    'flash',
+    'short_shot',
+    'contamination',
+    'other',
+  ] as const;
+
+  const getOrderQualityStatus = (order: Order): QualityStatus => {
+    const status = order.production_protocol?.quality_status;
+    if (status === 'warning' || status === 'quality_issue') return status;
+    return 'good';
+  };
+
+  const getLastQualityCheckAt = (order: Order): Date | null => {
+    const value = order.production_protocol?.last_quality_check_at;
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+  };
+
+  const getQualityChecks = (order: Order): QualityCheckEntry[] => {
+    const checks = order.production_protocol?.quality_checks;
+    if (!Array.isArray(checks)) return [];
+    return checks;
+  };
+
+  const getProtocolEntries = (order: Order): ProtocolEntry[] => {
+    const entries = order.production_protocol?.entries;
+    if (!Array.isArray(entries)) return [];
+    return entries;
+  };
+
+  const isQualityCheckOverdue = (order: Order): boolean => {
+    if (order.status !== 'in_progress') return false;
+    const last = getLastQualityCheckAt(order);
+    if (!last) return true;
+    const limitMs = 5 * 60 * 60 * 1000;
+    return Date.now() - last.getTime() > limitMs;
+  };
+
+  const getQualityStatusColor = (status: QualityStatus): string => {
+    if (status === 'good') return '#16a34a';
+    if (status === 'warning') return '#d97706';
+    return '#dc2626';
+  };
+
+  const getQualityStatusLabel = (status: QualityStatus): string => {
+    if (status === 'good') return t('quality_status_good');
+    if (status === 'warning') return t('quality_status_warning');
+    return t('quality_status_quality_issue');
+  };
+
+  const getQualityCheckColor = (entry: QualityCheckEntry): string => {
+    if (entry.quality_status === 'good') return '#16a34a';
+    if (entry.follow_up_status === 'stopped') return '#dc2626';
+    return '#d97706';
+  };
+
+  const getQualityCheckBadgeLabel = (entry: QualityCheckEntry): string => {
+    if (entry.quality_status === 'good') return t('quality_code_io');
+    if (entry.follow_up_status === 'stopped') return t('quality_code_stopped');
+    return t('quality_code_warning');
+  };
+
+  const openQualityModal = (order: Order) => {
+    const nextStatus = getOrderQualityStatus(order);
+    setQualityOrderId(order.id);
+    setQualityStatus(nextStatus);
+    setQualityCurrentQuantity(String(order.current_quantity ?? 0));
+    setQualityProblemType('surface_defect');
+    setQualityProblemNote('');
+    setQualityResolutionNote('');
+    setQualityFollowUpStatus(nextStatus === 'quality_issue' ? 'stopped' : 'warning');
+    setShowQualityModal(true);
+  };
+
+  const selectedQualityOrder = qualityOrderId
+    ? orders.find((item) => item.id === qualityOrderId) ?? null
+    : null;
+
+  const requiresResolutionNote = qualityStatus === 'good'
+    && selectedQualityOrder != null
+    && getOrderQualityStatus(selectedQualityOrder) !== 'good';
+
+  const createProtocolEntry = async (
+    orderId: number,
+    currentQuantityRaw: string,
+    entryType: 'quality_check' | 'order_status' | 'machine_issue' | 'mould_issue' | 'product_status' | 'protocol_update' | 'note',
+    note: string,
+    meta?: Record<string, string | number | null>
+  ) => {
+    const parsedQuantity = Number(currentQuantityRaw);
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity < 0) {
+      throw new Error(t('current_quantity_required'));
+    }
+
+    const response = await fetch(`${apiBaseUrl}/api/orders/${orderId}/protocol-entry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        current_quantity: Math.trunc(parsedQuantity),
+        entry_type: entryType,
+        note: note.trim() || null,
+        meta: meta ?? null,
+      }),
+    });
+
+    if (!response.ok) {
+      let message = `${t('error')}: ${response.status}`;
+      try {
+        const errorBody = await response.json() as {
+          message?: string;
+          errors?: Record<string, string[]>;
+        };
+        const firstFieldError = errorBody.errors ? Object.values(errorBody.errors)[0]?.[0] : null;
+        message = firstFieldError || errorBody.message || message;
+      } catch {
+        // Keep fallback when response body is not JSON.
+      }
+      throw new Error(message);
+    }
+
+    const updated = (await response.json()) as Order;
+    setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    return updated;
+  };
+
+  const saveQualityCheck = async () => {
+    if (!qualityOrderId) return;
+
+    const qualityQuantityNumber = Number(qualityCurrentQuantity);
+    if (!Number.isFinite(qualityQuantityNumber) || qualityQuantityNumber < 0) {
+      Alert.alert(t('error'), t('current_quantity_required'));
+      return;
+    }
+
+    if (qualityStatus !== 'good' && qualityProblemType === 'other' && !qualityProblemNote.trim()) {
+      Alert.alert(t('error'), t('problem_description_placeholder'));
+      return;
+    }
+
+    if (requiresResolutionNote && !qualityResolutionNote.trim()) {
+      Alert.alert(t('error'), t('resolution_note_required'));
+      return;
+    }
+
+    setIsQualitySaving(true);
+    try {
+      const payload: Record<string, string | number | null> = {
+        quality_status: qualityStatus,
+        problem_type: qualityStatus === 'good' ? null : qualityProblemType,
+        problem_note: qualityStatus === 'good' ? null : (qualityProblemType === 'other' ? qualityProblemNote.trim() : null),
+        follow_up_status: qualityStatus === 'good' ? null : qualityFollowUpStatus,
+        resolution_note: qualityStatus === 'good' ? qualityResolutionNote.trim() || null : null,
+        current_quantity: Math.trunc(qualityQuantityNumber),
+      };
+
+      const response = await fetch(`${apiBaseUrl}/api/orders/${qualityOrderId}/quality-check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        let message = `${t('error')}: ${response.status}`;
+
+        try {
+          const errorBody = await response.json() as {
+            message?: string;
+            errors?: Record<string, string[]>;
+          };
+
+          const firstFieldError = errorBody.errors
+            ? Object.values(errorBody.errors)[0]?.[0]
+            : null;
+
+          message = firstFieldError || errorBody.message || message;
+        } catch {
+          // Keep fallback status message when response is not JSON.
+        }
+
+        throw new Error(message);
+      }
+
+      const updated = (await response.json()) as Order;
+      setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setShowQualityModal(false);
+      Alert.alert(t('success'), t('quality_check_saved'));
+    } catch (error) {
+      Alert.alert(t('error'), error instanceof Error ? error.message : t('unknown_error'));
+    } finally {
+      setIsQualitySaving(false);
+    }
+  };
 
 
   const loadMachines = async () => {
@@ -240,6 +486,7 @@ export default function App() {
   const openIssueModal = (machine: DashboardMachine, target: IssueTarget = 'machine') => {
     setSelectedMachine(machine);
     setIssueTarget(target);
+    setIssueCurrentQuantity(String(machine.currentOrder?.current_quantity ?? 0));
 
     if (target === 'machine') {
       setNewStatus(machine.status);
@@ -259,9 +506,30 @@ export default function App() {
   const updateMachineStatus = async () => {
     if (!selectedMachine) return;
     setIsUpdating(true);
+    const selectedDashboardMachine = selectedMachine as DashboardMachine;
 
     try {
       let response: Response;
+      const currentOrder = selectedDashboardMachine.currentOrder;
+
+      if (currentOrder) {
+        const issueNote = issueTarget === 'machine'
+          ? `${t('machine')}: ${getIssueStatusLabel('machine', newStatus)}${problemDescription ? ` - ${problemDescription}` : ''}`
+          : issueTarget === 'mould'
+            ? `${t('mould')}: ${getIssueStatusLabel('mould', newStatus)}${problemDescription ? ` - ${problemDescription}` : ''}`
+            : `${t('product')}: ${getIssueStatusLabel('product', newStatus)}`;
+
+        await createProtocolEntry(
+          currentOrder.id,
+          issueCurrentQuantity,
+          issueTarget === 'machine' ? 'machine_issue' : issueTarget === 'mould' ? 'mould_issue' : 'product_status',
+          issueNote,
+          {
+            issue_target: issueTarget,
+            status: newStatus,
+          },
+        );
+      }
 
       if (issueTarget === 'machine') {
         response = await fetch(`${apiBaseUrl}/api/machines/${selectedMachine.id}/status`, {
@@ -275,7 +543,7 @@ export default function App() {
         setMachines(machines.map(m => (m.id === updated.id ? updated : m)));
         await loadOrders();
       } else if (issueTarget === 'mould') {
-        const mouldId = selectedMachine.currentOrder?.mould_id;
+        const mouldId = selectedDashboardMachine.currentOrder?.mould_id;
         if (!mouldId) throw new Error(t('unknown_error'));
 
         response = await fetch(`${apiBaseUrl}/api/moulds/${mouldId}/status`, {
@@ -290,7 +558,7 @@ export default function App() {
         setMoulds(moulds.map(m => (m.id === updated.id ? updated : m)));
         await loadOrders();
       } else {
-        const productId = selectedMachine.currentOrder?.product_id;
+        const productId = selectedDashboardMachine.currentOrder?.product_id;
         if (!productId) throw new Error(t('unknown_error'));
 
         response = await fetch(`${apiBaseUrl}/api/products/${productId}/status`, {
@@ -485,6 +753,10 @@ export default function App() {
   const openProtocolModal = (order: Order) => {
     setProtocolOrderId(order.id);
     setProtocolDraft(buildProtocolDraft(order));
+    setIsProtocolEditMode(false);
+    setShowProtocolProductData(false);
+    setShowProtocolStatusActions(false);
+    setProtocolEntryCurrentQuantity(String(order.current_quantity ?? 0));
     setShowProtocolModal(true);
   };
 
@@ -507,6 +779,12 @@ export default function App() {
   const saveProductionProtocol = async () => {
     if (!protocolOrderId || !protocolDraft) return;
 
+    const entryQtyNumber = Number(protocolEntryCurrentQuantity);
+    if (!Number.isFinite(entryQtyNumber) || entryQtyNumber < 0) {
+      Alert.alert(t('error'), t('current_quantity_required'));
+      return;
+    }
+
     const colorPercentage = protocolDraft.color_percentage.trim() === '' ? null : Number(protocolDraft.color_percentage);
     const cycleTime = protocolDraft.cycle_time.trim() === '' ? null : Number(protocolDraft.cycle_time);
     const quantity = protocolDraft.quantity.trim() === '' ? null : Number(protocolDraft.quantity);
@@ -526,6 +804,13 @@ export default function App() {
 
     setIsProtocolSaving(true);
     try {
+      await createProtocolEntry(
+        protocolOrderId,
+        String(Math.trunc(entryQtyNumber)),
+        'protocol_update',
+        t('edit_product_data'),
+      );
+
       const response = await fetch(`${apiBaseUrl}/api/orders/${protocolOrderId}/protocol`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -547,6 +832,8 @@ export default function App() {
 
       const updated = (await response.json()) as Order;
       setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setProtocolDraft(buildProtocolDraft(updated));
+      setIsProtocolEditMode(false);
       setShowProtocolModal(false);
       Alert.alert(t('success'), t('production_protocol_saved'));
     } catch (error) {
@@ -695,10 +982,25 @@ export default function App() {
     }
   };
 
-  const updateOrderStatus = async (order: Order, status: 'paused' | 'completed' | 'interrupted', goodQuantity?: number, badQuantity?: number) => {
+  const updateOrderStatus = async (
+    order: Order,
+    status: 'paused' | 'completed' | 'interrupted',
+    currentQuantity: number,
+    goodQuantity?: number,
+    badQuantity?: number
+  ) => {
     try {
+      await createProtocolEntry(
+        order.id,
+        String(currentQuantity),
+        'order_status',
+        `${t('order_status_actions')}: ${getOrderStatusLabel(status)}`,
+        { status },
+      );
+
       const payload: Record<string, string | number | null> = {
         status,
+        current_quantity: currentQuantity,
       };
 
       if (status === 'paused') {
@@ -706,7 +1008,7 @@ export default function App() {
       }
 
       if (status === 'completed' || status === 'interrupted') {
-        payload.good_quantity = goodQuantity ?? Number(getProductionDraft(order).current_quantity || 0);
+        payload.good_quantity = goodQuantity ?? currentQuantity;
         payload.bad_quantity = badQuantity ?? 0;
       }
 
@@ -720,23 +1022,17 @@ export default function App() {
 
       const updated = (await response.json()) as Order;
       setOrders((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      setProductionDrafts((current) => ({
-        ...current,
-        [updated.id]: {
-          current_quantity: String(updated.current_quantity ?? 0),
-        },
-      }));
       Alert.alert(t('success'), t('order_status_updated'));
     } catch (error) {
       Alert.alert(t('error'), error instanceof Error ? error.message : t('unknown_error'));
     }
   };
 
-  const openFinalizeModal = (order: Order, status: 'completed' | 'interrupted') => {
-    const draft = getProductionDraft(order);
-    const current = Number(draft.current_quantity || 0);
+  const openFinalizeModal = (order: Order, status: 'paused' | 'completed' | 'interrupted') => {
+    const current = Number(order.current_quantity ?? 0);
     setFinalizeOrderId(order.id);
     setFinalizeStatus(status);
+    setFinalizeCurrentQuantity(String(Number.isFinite(current) ? current : 0));
     setFinalizeGoodQuantity(String(Number.isFinite(current) ? current : 0));
     setFinalizeBadQuantity('0');
     setShowFinalizeModal(true);
@@ -748,15 +1044,27 @@ export default function App() {
     const order = orders.find((item) => item.id === finalizeOrderId);
     if (!order) return;
 
+    const current = Number(finalizeCurrentQuantity);
     const good = Number(finalizeGoodQuantity);
     const bad = Number(finalizeBadQuantity);
 
-    if (!Number.isFinite(good) || !Number.isFinite(bad) || good < 0 || bad < 0) {
+    if (!Number.isFinite(current) || current < 0) {
+      Alert.alert(t('error'), t('current_quantity_required'));
+      return;
+    }
+
+    if ((finalizeStatus === 'completed' || finalizeStatus === 'interrupted') && (!Number.isFinite(good) || !Number.isFinite(bad) || good < 0 || bad < 0)) {
       Alert.alert(t('error'), t('unknown_error'));
       return;
     }
 
-    await updateOrderStatus(order, finalizeStatus, good, bad);
+    await updateOrderStatus(
+      order,
+      finalizeStatus,
+      Math.trunc(current),
+      finalizeStatus === 'paused' ? undefined : good,
+      finalizeStatus === 'paused' ? undefined : bad,
+    );
     setShowFinalizeModal(false);
   };
 
@@ -821,7 +1129,7 @@ export default function App() {
 
   const percentWidth = (value: number) => {
     const bounded = Math.max(0, Math.min(1, value));
-    return `${Math.max(4, Math.round(bounded * 100))}%`;
+    return `${Math.max(4, Math.round(bounded * 100))}%` as `${number}%`;
   };
 
   const loadProducts = async () => {
@@ -932,6 +1240,44 @@ export default function App() {
     }
   };
 
+  const getOrderCardIssueInfo = (machine: DashboardMachine) => {
+    const messages: string[] = [];
+    let severity: 'none' | 'warning' | 'error' = 'none';
+
+    if (machine.status === 'broken') {
+      severity = 'error';
+      messages.push(`${t('machine')}: ${getStatusLabel(machine.status)}${machine.problem_description ? ` - ${machine.problem_description}` : ''}`);
+    } else if (machine.status === 'warning' || machine.status === 'stopped') {
+      if (severity === 'none') {
+        severity = 'warning';
+      }
+      messages.push(`${t('machine')}: ${getStatusLabel(machine.status)}${machine.problem_description ? ` - ${machine.problem_description}` : ''}`);
+    }
+
+    const mould = machine.currentOrder?.mould;
+    if (mould) {
+      if (mould.status === 'needs_repair') {
+        severity = 'error';
+        messages.push(`${t('mould')}: ${getMouldStatusLabel(mould.status)}${mould.problem_description ? ` - ${mould.problem_description}` : ''}`);
+      } else if (mould.status === 'warning' || mould.status === 'under_repair') {
+        if (severity === 'none') {
+          severity = 'warning';
+        }
+        messages.push(`${t('mould')}: ${getMouldStatusLabel(mould.status)}${mould.problem_description ? ` - ${mould.problem_description}` : ''}`);
+      }
+    }
+
+    const product = machine.currentOrder?.product;
+    if (product && product.is_active === false) {
+      if (severity === 'none') {
+        severity = 'warning';
+      }
+      messages.push(`${t('product')}: ${t('status_inactive')}`);
+    }
+
+    return { severity, messages };
+  };
+
   const openMachineOrdersModal = (machine: DashboardMachine) => {
     setMachineOrdersMachine(machine);
     setShowMachineOrdersModal(true);
@@ -946,11 +1292,22 @@ export default function App() {
   const activateOrder = async (order: Order) => {
     setActivatingOrderId(order.id);
     try {
+      const currentQty = Math.max(0, Math.trunc(Number(order.current_quantity ?? 0)));
+
+      await createProtocolEntry(
+        order.id,
+        String(currentQty),
+        'order_status',
+        `${t('order_status_actions')}: ${t('order_status_in_progress')}`,
+        { status: 'in_progress' },
+      );
+
       const response = await fetch(`${apiBaseUrl}/api/orders/${order.id}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: 'in_progress',
+          current_quantity: currentQty,
         }),
       });
 
@@ -974,6 +1331,10 @@ export default function App() {
   const switchLanguage = (lang: string) => {
     i18n.changeLanguage(lang);
   };
+
+  const selectedProtocolOrder = protocolOrderId
+    ? orders.find((item) => item.id === protocolOrderId) ?? null
+    : null;
 
   const Navbar = () => (
     <View style={styles.navbar}>
@@ -1090,8 +1451,17 @@ export default function App() {
       <FlatList
         data={dashboardMachines}
         keyExtractor={(item) => item.id.toString()}
-        renderItem={({ item }) => (
-          <View style={styles.machineCard}>
+        renderItem={({ item }) => {
+          const cardIssueInfo = getOrderCardIssueInfo(item);
+
+          return (
+          <View
+            style={[
+              styles.machineCard,
+              cardIssueInfo.severity === 'warning' && styles.machineCardWarning,
+              cardIssueInfo.severity === 'error' && styles.machineCardError,
+            ]}
+          >
             <View style={styles.machineHeader}>
               <View style={styles.machineHeaderLeft}>
                 <Text style={styles.machineName}>{item.name}</Text>
@@ -1129,59 +1499,44 @@ export default function App() {
                   {t('started_at')}: {formatEta(item.currentOrder.started_at ? new Date(item.currentOrder.started_at) : null)}
                 </Text>
 
+                <View style={styles.qualitySummaryBox}>
+                  <View style={styles.qualitySummaryHeader}>
+                    <Text style={styles.qualitySummaryTitle}>{t('quality_status')}</Text>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        { backgroundColor: getQualityStatusColor(getOrderQualityStatus(item.currentOrder)) },
+                      ]}
+                    >
+                      <Text style={styles.statusBadgeText}>{getQualityStatusLabel(getOrderQualityStatus(item.currentOrder))}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.machineMeta}>
+                    {t('last_quality_check')}: {formatEta(getLastQualityCheckAt(item.currentOrder))}
+                  </Text>
+                  {isQualityCheckOverdue(item.currentOrder) && (
+                    <Text style={styles.qualityWarningText}>{t('quality_check_overdue')}</Text>
+                  )}
+
+                  <Pressable
+                    style={[styles.actionButton, styles.qualityCheckButton]}
+                    onPress={() => openQualityModal(item.currentOrder!)}
+                  >
+                    <Text style={styles.actionButtonText}>{t('quality_check_now')}</Text>
+                  </Pressable>
+                </View>
+
                 {(() => {
-                  const draft = getProductionDraft(item.currentOrder);
-                  const tracking = getOrderTracking(item.currentOrder, draft);
+                  const currentOrder = item.currentOrder;
+                  if (!currentOrder) return null;
+
+                  const tracking = getOrderTracking(currentOrder);
 
                   return (
                     <>
-                      <View style={styles.productionInputsRow}>
-                        <View style={styles.productionInputBlock}>
-                          <Text style={styles.productionLabel}>{t('current_quantity')}</Text>
-                          <TextInput
-                            style={styles.productionInput}
-                            keyboardType="numeric"
-                            value={draft.current_quantity}
-                            onChangeText={(value) => updateProductionDraft(item.currentOrder.id, 'current_quantity', value)}
-                          />
-                        </View>
-                      </View>
-
-                      <Pressable
-                        style={[styles.actionButton, styles.productionSaveButton]}
-                        onPress={() => saveProductionData(item.currentOrder!)}
-                      >
-                        <Text style={styles.actionButtonText}>{t('save_production_data')}</Text>
-                      </Pressable>
-
-                      <Pressable
-                        style={[styles.actionButton, styles.protocolButton]}
-                        onPress={() => openProtocolModal(item.currentOrder!)}
-                      >
-                        <Text style={styles.actionButtonText}>{t('production_protocol')}</Text>
-                      </Pressable>
-
-                      <Text style={styles.productionLabel}>{t('order_status_actions')}</Text>
-                      <View style={styles.orderStatusButtonsRow}>
-                        <Pressable
-                          style={[styles.orderStatusButton, styles.orderPausedButton]}
-                          onPress={() => updateOrderStatus(item.currentOrder!, 'paused')}
-                        >
-                          <Text style={styles.actionButtonText}>{t('order_status_paused')}</Text>
-                        </Pressable>
-                        <Pressable
-                          style={[styles.orderStatusButton, styles.orderCompletedButton]}
-                          onPress={() => openFinalizeModal(item.currentOrder!, 'completed')}
-                        >
-                          <Text style={styles.actionButtonText}>{t('order_status_completed')}</Text>
-                        </Pressable>
-                        <Pressable
-                          style={[styles.orderStatusButton, styles.orderInterruptedButton]}
-                          onPress={() => openFinalizeModal(item.currentOrder!, 'interrupted')}
-                        >
-                          <Text style={styles.actionButtonText}>{t('order_status_interrupted')}</Text>
-                        </Pressable>
-                      </View>
+                      <Text style={styles.machineMeta}>
+                        {t('current_quantity')}: {currentOrder.current_quantity ?? 0}
+                      </Text>
 
                       <View style={styles.progressGroup}>
                         <Text style={styles.progressLabel}>{t('theoretical_progress')} + {t('actual_progress')}</Text>
@@ -1221,12 +1576,26 @@ export default function App() {
                           {t('actual_eta')}: {formatEta(tracking.actualEta)}
                         </Text>
                       </View>
+
+                      <Pressable
+                        style={[styles.actionButton, styles.protocolButton]}
+                        onPress={() => openProtocolModal(currentOrder)}
+                      >
+                        <Text style={styles.actionButtonText}>{t('production_protocol')}</Text>
+                      </Pressable>
                     </>
                   );
                 })()}
               </View>
             ) : (
               <Text style={styles.inactiveText}>{t('no_active_order')}</Text>
+            )}
+            {cardIssueInfo.messages.length > 0 && (
+              <View style={styles.cardIssueBox}>
+                {cardIssueInfo.messages.map((message, idx) => (
+                  <Text key={`${item.id}-issue-${idx}`} style={styles.cardIssueText}>{message}</Text>
+                ))}
+              </View>
             )}
             {item.problem_description && (
               <Text style={styles.problemText}>
@@ -1241,7 +1610,8 @@ export default function App() {
               <Text style={styles.actionButtonText}>{t('more_orders')}</Text>
             </Pressable>
           </View>
-        )}
+        );
+      }}
         contentContainerStyle={styles.listContent}
       />
     </View>
@@ -1351,6 +1721,11 @@ export default function App() {
             <Text style={styles.modalTitle}>{t('issue_report_title')}</Text>
             {selectedMachine && (
               <>
+                {(() => {
+                  const selectedDashboardMachine = selectedMachine as DashboardMachine;
+
+                  return (
+                    <>
                 <Text style={styles.modalMachineName}>{selectedMachine.name}</Text>
 
                 <Text style={styles.modalLabel}>{t('issue_target')}:</Text>
@@ -1361,7 +1736,7 @@ export default function App() {
                   >
                     <Text style={styles.targetButtonText}>{t('machine')}</Text>
                   </Pressable>
-                  {selectedMachine.currentOrder?.mould && (
+                  {selectedDashboardMachine.currentOrder?.mould && (
                     <Pressable
                       style={[styles.targetButton, issueTarget === 'mould' && styles.targetButtonSelected]}
                       onPress={() => openIssueModal(selectedMachine as DashboardMachine, 'mould')}
@@ -1369,7 +1744,7 @@ export default function App() {
                       <Text style={styles.targetButtonText}>{t('mould')}</Text>
                     </Pressable>
                   )}
-                  {selectedMachine.currentOrder?.product && (
+                  {selectedDashboardMachine.currentOrder?.product && (
                     <Pressable
                       style={[styles.targetButton, issueTarget === 'product' && styles.targetButtonSelected]}
                       onPress={() => openIssueModal(selectedMachine as DashboardMachine, 'product')}
@@ -1398,6 +1773,18 @@ export default function App() {
                     <Text style={styles.statusOptionText}>{getIssueStatusLabel(issueTarget, status)}</Text>
                   </Pressable>
                 ))}
+
+                {selectedDashboardMachine.currentOrder && (
+                  <>
+                    <Text style={styles.modalLabel}>{t('current_quantity')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      keyboardType="numeric"
+                      value={issueCurrentQuantity}
+                      onChangeText={setIssueCurrentQuantity}
+                    />
+                  </>
+                )}
 
                 {requiresProblemDescription(issueTarget, newStatus) && (
                   <>
@@ -1431,6 +1818,9 @@ export default function App() {
                     </Text>
                   </Pressable>
                 </View>
+                    </>
+                  );
+                })()}
               </>
             )}
           </ScrollView>
@@ -1503,91 +1893,280 @@ export default function App() {
 
             {protocolDraft && (
               <>
-                <Text style={styles.modalLabel}>{t('machine_name')}</Text>
-                <TextInput
-                  style={styles.productionInput}
-                  value={protocolDraft.machine_name}
-                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, machine_name: value } : current))}
-                />
+                <Text style={styles.modalLabel}>{t('quality_check_history')}</Text>
+                {selectedProtocolOrder && getProtocolEntries(selectedProtocolOrder).length > 0 ? (
+                  <View style={styles.qualityHistoryList}>
+                    {getProtocolEntries(selectedProtocolOrder)
+                      .slice()
+                      .reverse()
+                      .map((entry, index) => {
+                        const eventTime = entry.timestamp ? new Date(entry.timestamp) : null;
 
-                <Text style={styles.modalLabel}>{t('part_code')}</Text>
-                <TextInput
-                  style={styles.productionInput}
-                  value={protocolDraft.part_code}
-                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, part_code: value } : current))}
-                />
+                        return (
+                          <View key={`${entry.timestamp}-${index}`} style={[styles.qualityHistoryItem, { borderLeftColor: '#64748b' }]}>
+                            <Text style={styles.qualityHistoryTitle}>
+                              {t('quality_checked_at')}: {formatEta(eventTime && !Number.isNaN(eventTime.getTime()) ? eventTime : null)}
+                            </Text>
+                            <Text style={styles.machineMeta}>{t('current_quantity')}: {entry.current_quantity ?? 0}</Text>
+                            <Text style={styles.machineMeta}>{t('status')}: {entry.entry_type}</Text>
+                            {entry.note ? <Text style={styles.machineMeta}>{t('problem')}: {entry.note}</Text> : null}
+                          </View>
+                        );
+                      })}
+                  </View>
+                ) : null}
 
-                <Text style={styles.modalLabel}>{t('material_code')}</Text>
-                <TextInput
-                  style={styles.productionInput}
-                  value={protocolDraft.material_code}
-                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, material_code: value } : current))}
-                />
+                {selectedProtocolOrder && getQualityChecks(selectedProtocolOrder).length > 0 ? (
+                  <View style={styles.qualityHistoryList}>
+                    {getQualityChecks(selectedProtocolOrder)
+                      .slice()
+                      .reverse()
+                      .map((entry, index) => {
+                        const checkedAt = entry.checked_at ? new Date(entry.checked_at) : null;
+                        const parsedStatus: QualityStatus = entry.quality_status === 'warning' || entry.quality_status === 'quality_issue'
+                          ? entry.quality_status
+                          : 'good';
 
-                <Text style={styles.modalLabel}>{t('color_code_optional')}</Text>
-                <TextInput
-                  style={styles.productionInput}
-                  value={protocolDraft.color_code}
-                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, color_code: value } : current))}
-                />
+                        return (
+                          <View key={`${entry.checked_at}-${index}`} style={[styles.qualityHistoryItem, { borderLeftColor: getQualityCheckColor(entry) }]}>
+                            <View style={styles.qualityHistoryHeaderRow}>
+                              <Text style={styles.qualityHistoryTitle}>
+                                {t('quality_checked_at')}: {formatEta(checkedAt && !Number.isNaN(checkedAt.getTime()) ? checkedAt : null)}
+                              </Text>
+                              <View style={[styles.qualityCheckCodeBadge, { backgroundColor: getQualityCheckColor(entry) }]}>
+                                <Text style={styles.qualityCheckCodeBadgeText}>{getQualityCheckBadgeLabel(entry)}</Text>
+                              </View>
+                            </View>
+                            <Text style={styles.qualityHistoryTitle}>
+                              {t('quality_status')}: {getQualityStatusLabel(parsedStatus)}
+                            </Text>
+                            <Text style={styles.machineMeta}>
+                              {t('quality_protocol_entry')}: {entry.protocol_entry}
+                            </Text>
+                            <Text style={styles.machineMeta}>
+                              {t('current_quantity')}: {entry.current_quantity ?? 0}
+                            </Text>
+                            {entry.problem_note ? (
+                              <Text style={styles.machineMeta}>
+                                {t('problem')}: {entry.problem_note}
+                              </Text>
+                            ) : null}
+                            {entry.follow_up_status ? (
+                              <Text style={styles.machineMeta}>
+                                {t('status')}: {entry.follow_up_status === 'warning' ? t('follow_up_warning') : t('follow_up_stopped')}
+                              </Text>
+                            ) : null}
+                            {entry.resolution_note ? (
+                              <Text style={styles.machineMeta}>
+                                {t('resolution_note')}: {entry.resolution_note}
+                              </Text>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                  </View>
+                ) : (
+                  <Text style={styles.machineMeta}>{t('quality_no_history')}</Text>
+                )}
 
-                <Text style={styles.modalLabel}>{t('color_percentage_optional')}</Text>
-                <TextInput
-                  style={styles.productionInput}
-                  keyboardType="numeric"
-                  value={protocolDraft.color_percentage}
-                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, color_percentage: value } : current))}
-                />
+                {selectedProtocolOrder && (
+                  <>
+                    <Pressable
+                      style={styles.protocolStatusCollectorButton}
+                      onPress={() => setShowProtocolStatusActions((current) => !current)}
+                    >
+                      <Text style={styles.protocolStatusCollectorText}>{t('production_status_modify')}</Text>
+                    </Pressable>
 
-                <Text style={styles.modalLabel}>{t('additives_codes_percentages_optional')}</Text>
-                <TextInput
-                  style={styles.problemInput}
-                  value={protocolDraft.additives}
-                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, additives: value } : current))}
-                  multiline={true}
-                  numberOfLines={4}
-                />
+                    {showProtocolStatusActions && (
+                      <View style={styles.orderStatusButtonsRow}>
+                        <Pressable
+                          style={[styles.orderStatusButton, styles.orderPausedButton]}
+                          onPress={() => openFinalizeModal(selectedProtocolOrder, 'paused')}
+                        >
+                          <Text style={styles.actionButtonText}>{t('order_status_paused')}</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.orderStatusButton, styles.orderCompletedButton]}
+                          onPress={() => openFinalizeModal(selectedProtocolOrder, 'completed')}
+                        >
+                          <Text style={styles.actionButtonText}>{t('order_status_completed')}</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.orderStatusButton, styles.orderInterruptedButton]}
+                          onPress={() => openFinalizeModal(selectedProtocolOrder, 'interrupted')}
+                        >
+                          <Text style={styles.actionButtonText}>{t('order_status_interrupted')}</Text>
+                        </Pressable>
+                      </View>
+                    )}
+                  </>
+                )}
 
-                <Text style={styles.modalLabel}>{t('cycle_time_seconds')}</Text>
-                <TextInput
-                  style={styles.productionInput}
-                  keyboardType="numeric"
-                  value={protocolDraft.cycle_time}
-                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, cycle_time: value } : current))}
-                />
+                <Pressable
+                  style={styles.protocolToggleButton}
+                  onPress={() => setShowProtocolProductData((current) => !current)}
+                >
+                  <Text style={styles.protocolToggleButtonText}>
+                    {showProtocolProductData ? t('hide_product_data') : t('show_product_data')}
+                  </Text>
+                </Pressable>
 
-                <Text style={styles.modalLabel}>{t('total_quantity')}</Text>
-                <TextInput
-                  style={styles.productionInput}
-                  keyboardType="numeric"
-                  value={protocolDraft.quantity}
-                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, quantity: value } : current))}
-                />
+                {showProtocolProductData && (
+                  <View style={styles.protocolList}>
+                    <View style={styles.protocolListItem}>
+                      <Text style={styles.protocolListLabel}>{t('machine_name')}</Text>
+                      <Text style={styles.protocolListValue}>{protocolDraft.machine_name || '-'}</Text>
+                    </View>
+                    <View style={styles.protocolListItem}>
+                      <Text style={styles.protocolListLabel}>{t('part_code')}</Text>
+                      <Text style={styles.protocolListValue}>{protocolDraft.part_code || '-'}</Text>
+                    </View>
+                    <View style={styles.protocolListItem}>
+                      <Text style={styles.protocolListLabel}>{t('material_code')}</Text>
+                      <Text style={styles.protocolListValue}>{protocolDraft.material_code || '-'}</Text>
+                    </View>
+                    <View style={styles.protocolListItem}>
+                      <Text style={styles.protocolListLabel}>{t('color_code_optional')}</Text>
+                      <Text style={styles.protocolListValue}>{protocolDraft.color_code || '-'}</Text>
+                    </View>
+                    <View style={styles.protocolListItem}>
+                      <Text style={styles.protocolListLabel}>{t('color_percentage_optional')}</Text>
+                      <Text style={styles.protocolListValue}>{protocolDraft.color_percentage || '-'}</Text>
+                    </View>
+                    <View style={styles.protocolListItem}>
+                      <Text style={styles.protocolListLabel}>{t('additives_codes_percentages_optional')}</Text>
+                      <Text style={styles.protocolListValue}>{protocolDraft.additives || '-'}</Text>
+                    </View>
+                    <View style={styles.protocolListItem}>
+                      <Text style={styles.protocolListLabel}>{t('cycle_time_seconds')}</Text>
+                      <Text style={styles.protocolListValue}>{protocolDraft.cycle_time || '-'}</Text>
+                    </View>
+                    <View style={styles.protocolListItem}>
+                      <Text style={styles.protocolListLabel}>{t('total_quantity')}</Text>
+                      <Text style={styles.protocolListValue}>{protocolDraft.quantity || '-'}</Text>
+                    </View>
+                    <View style={styles.protocolListItem}>
+                      <Text style={styles.protocolListLabel}>{t('gross_weight_optional')}</Text>
+                      <Text style={styles.protocolListValue}>{protocolDraft.gross_weight || '-'}</Text>
+                    </View>
+                    <View style={styles.protocolListItem}>
+                      <Text style={styles.protocolListLabel}>{t('net_weight')}</Text>
+                      <Text style={styles.protocolListValue}>{protocolDraft.net_weight || '-'}</Text>
+                    </View>
+                  </View>
+                )}
 
-                <Text style={styles.modalLabel}>{t('gross_weight_optional')}</Text>
-                <TextInput
-                  style={styles.productionInput}
-                  keyboardType="numeric"
-                  value={protocolDraft.gross_weight}
-                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, gross_weight: value } : current))}
-                />
+                {isProtocolEditMode && (
+                  <>
+                    <Text style={styles.modalLabel}>{t('current_quantity')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      keyboardType="numeric"
+                      value={protocolEntryCurrentQuantity}
+                      onChangeText={setProtocolEntryCurrentQuantity}
+                    />
 
-                <Text style={styles.modalLabel}>{t('net_weight')}</Text>
-                <TextInput
-                  style={styles.productionInput}
-                  keyboardType="numeric"
-                  value={protocolDraft.net_weight}
-                  onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, net_weight: value } : current))}
-                />
+                    <Text style={styles.modalLabel}>{t('machine_name')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      value={protocolDraft.machine_name}
+                      onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, machine_name: value } : current))}
+                    />
+
+                    <Text style={styles.modalLabel}>{t('part_code')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      value={protocolDraft.part_code}
+                      onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, part_code: value } : current))}
+                    />
+
+                    <Text style={styles.modalLabel}>{t('material_code')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      value={protocolDraft.material_code}
+                      onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, material_code: value } : current))}
+                    />
+
+                    <Text style={styles.modalLabel}>{t('color_code_optional')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      value={protocolDraft.color_code}
+                      onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, color_code: value } : current))}
+                    />
+
+                    <Text style={styles.modalLabel}>{t('color_percentage_optional')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      keyboardType="numeric"
+                      value={protocolDraft.color_percentage}
+                      onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, color_percentage: value } : current))}
+                    />
+
+                    <Text style={styles.modalLabel}>{t('additives_codes_percentages_optional')}</Text>
+                    <TextInput
+                      style={styles.problemInput}
+                      value={protocolDraft.additives}
+                      onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, additives: value } : current))}
+                      multiline={true}
+                      numberOfLines={4}
+                    />
+
+                    <Text style={styles.modalLabel}>{t('cycle_time_seconds')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      keyboardType="numeric"
+                      value={protocolDraft.cycle_time}
+                      onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, cycle_time: value } : current))}
+                    />
+
+                    <Text style={styles.modalLabel}>{t('total_quantity')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      keyboardType="numeric"
+                      value={protocolDraft.quantity}
+                      onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, quantity: value } : current))}
+                    />
+
+                    <Text style={styles.modalLabel}>{t('gross_weight_optional')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      keyboardType="numeric"
+                      value={protocolDraft.gross_weight}
+                      onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, gross_weight: value } : current))}
+                    />
+
+                    <Text style={styles.modalLabel}>{t('net_weight')}</Text>
+                    <TextInput
+                      style={styles.productionInput}
+                      keyboardType="numeric"
+                      value={protocolDraft.net_weight}
+                      onChangeText={(value) => setProtocolDraft((current) => (current ? { ...current, net_weight: value } : current))}
+                    />
+                  </>
+                )}
 
                 <View style={styles.modalButtonGroup}>
                   <Pressable
                     style={[styles.modalButton, { backgroundColor: '#ef4444' }]}
-                    onPress={() => setShowProtocolModal(false)}
+                    onPress={() => {
+                      setIsProtocolEditMode(false);
+                      setShowProtocolModal(false);
+                    }}
                     disabled={isProtocolSaving}
                   >
-                    <Text style={styles.modalButtonText}>{t('cancel')}</Text>
+                    <Text style={styles.modalButtonText}>{t('close')}</Text>
                   </Pressable>
+                  {!isProtocolEditMode && (
+                    <Pressable
+                      style={[styles.modalButton, { backgroundColor: '#0f766e' }]}
+                      onPress={() => setIsProtocolEditMode(true)}
+                      disabled={isProtocolSaving}
+                    >
+                      <Text style={styles.modalButtonText}>{t('edit_product_data')}</Text>
+                    </Pressable>
+                  )}
+                  {isProtocolEditMode && (
                   <Pressable
                     style={[styles.modalButton, { backgroundColor: '#22c55e' }]}
                     onPress={saveProductionProtocol}
@@ -1597,6 +2176,7 @@ export default function App() {
                       {isProtocolSaving ? t('updating') : t('save')}
                     </Text>
                   </Pressable>
+                  )}
                 </View>
               </>
             )}
@@ -1656,25 +2236,41 @@ export default function App() {
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>
-              {finalizeStatus === 'completed' ? t('order_status_completed') : t('order_status_interrupted')}
+              {finalizeStatus === 'completed'
+                ? t('order_status_completed')
+                : finalizeStatus === 'interrupted'
+                  ? t('order_status_interrupted')
+                  : t('order_status_paused')}
             </Text>
-            <Text style={styles.modalMachineName}>{t('finalize_order_quantities')}</Text>
+            <Text style={styles.modalMachineName}>{t('protocol_entry_required')}</Text>
 
-            <Text style={styles.modalLabel}>{t('good_quantity')}</Text>
+            <Text style={styles.modalLabel}>{t('current_quantity')}</Text>
             <TextInput
               style={styles.productionInput}
               keyboardType="numeric"
-              value={finalizeGoodQuantity}
-              onChangeText={setFinalizeGoodQuantity}
+              value={finalizeCurrentQuantity}
+              onChangeText={setFinalizeCurrentQuantity}
             />
 
-            <Text style={styles.modalLabel}>{t('bad_quantity')}</Text>
-            <TextInput
-              style={styles.productionInput}
-              keyboardType="numeric"
-              value={finalizeBadQuantity}
-              onChangeText={setFinalizeBadQuantity}
-            />
+            {(finalizeStatus === 'completed' || finalizeStatus === 'interrupted') && (
+              <>
+                <Text style={styles.modalLabel}>{t('good_quantity')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  keyboardType="numeric"
+                  value={finalizeGoodQuantity}
+                  onChangeText={setFinalizeGoodQuantity}
+                />
+
+                <Text style={styles.modalLabel}>{t('bad_quantity')}</Text>
+                <TextInput
+                  style={styles.productionInput}
+                  keyboardType="numeric"
+                  value={finalizeBadQuantity}
+                  onChangeText={setFinalizeBadQuantity}
+                />
+              </>
+            )}
 
             <View style={styles.modalButtonGroup}>
               <Pressable
@@ -1691,6 +2287,128 @@ export default function App() {
               </Pressable>
             </View>
           </View>
+        </SafeAreaView>
+      </Modal>
+
+      <Modal visible={showQualityModal} animationType="slide" transparent={true}>
+        <SafeAreaView style={styles.modalContainer}>
+          <ScrollView style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{t('quality_check_now')}</Text>
+
+            <Text style={styles.modalLabel}>{t('current_quantity')}</Text>
+            <TextInput
+              style={styles.productionInput}
+              keyboardType="numeric"
+              value={qualityCurrentQuantity}
+              onChangeText={setQualityCurrentQuantity}
+            />
+
+            <Text style={styles.modalLabel}>{t('quality_result')}</Text>
+            {(['good', 'warning', 'quality_issue'] as const).map((status) => (
+              <Pressable
+                key={status}
+                style={[
+                  styles.statusOption,
+                  qualityStatus === status && styles.statusOptionSelected,
+                ]}
+                onPress={() => {
+                  setQualityStatus(status);
+                  if (status === 'good') {
+                    setQualityFollowUpStatus('warning');
+                  }
+                }}
+              >
+                <View
+                  style={[
+                    styles.statusOptionDot,
+                    { backgroundColor: getQualityStatusColor(status) },
+                  ]}
+                />
+                <Text style={styles.statusOptionText}>{getQualityStatusLabel(status)}</Text>
+              </Pressable>
+            ))}
+
+            {qualityStatus === 'good' ? (
+              <View style={styles.ioBox}>
+                <Text style={styles.ioText}>{t('quality_protocol_entry')}: IO</Text>
+                <Text style={styles.modalLabel}>{t('resolution_note')}</Text>
+                {requiresResolutionNote ? (
+                  <Text style={styles.qualityWarningText}>{t('resolution_note_required')}</Text>
+                ) : null}
+                <TextInput
+                  style={styles.problemInput}
+                  placeholder={t('resolution_note_placeholder')}
+                  value={qualityResolutionNote}
+                  onChangeText={setQualityResolutionNote}
+                  multiline={true}
+                  numberOfLines={4}
+                />
+              </View>
+            ) : (
+              <>
+                <Text style={styles.modalLabel}>{t('problem_type')}</Text>
+                {qualityProblemOptions.map((problem) => (
+                  <Pressable
+                    key={problem}
+                    style={[
+                      styles.statusOption,
+                      qualityProblemType === problem && styles.statusOptionSelected,
+                    ]}
+                    onPress={() => setQualityProblemType(problem)}
+                  >
+                    <Text style={styles.statusOptionText}>{t(`problem_type_${problem}`)}</Text>
+                  </Pressable>
+                ))}
+
+                {qualityProblemType === 'other' && (
+                  <>
+                    <Text style={styles.modalLabel}>{t('problem_custom_note')}</Text>
+                    <TextInput
+                      style={styles.problemInput}
+                      placeholder={t('problem_custom_note_placeholder')}
+                      value={qualityProblemNote}
+                      onChangeText={setQualityProblemNote}
+                      multiline={true}
+                      numberOfLines={4}
+                    />
+                  </>
+                )}
+
+                <Text style={styles.modalLabel}>{t('follow_up_action')}</Text>
+                {(['warning', 'stopped'] as const).map((nextStatus) => (
+                  <Pressable
+                    key={nextStatus}
+                    style={[
+                      styles.statusOption,
+                      qualityFollowUpStatus === nextStatus && styles.statusOptionSelected,
+                    ]}
+                    onPress={() => setQualityFollowUpStatus(nextStatus)}
+                  >
+                    <Text style={styles.statusOptionText}>
+                      {nextStatus === 'warning' ? t('follow_up_warning') : t('follow_up_stopped')}
+                    </Text>
+                  </Pressable>
+                ))}
+              </>
+            )}
+
+            <View style={styles.modalButtonGroup}>
+              <Pressable
+                style={[styles.modalButton, { backgroundColor: '#ef4444' }]}
+                onPress={() => setShowQualityModal(false)}
+                disabled={isQualitySaving}
+              >
+                <Text style={styles.modalButtonText}>{t('cancel')}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButton, { backgroundColor: '#16a34a' }]}
+                onPress={saveQualityCheck}
+                disabled={isQualitySaving}
+              >
+                <Text style={styles.modalButtonText}>{isQualitySaving ? t('updating') : t('save')}</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
         </SafeAreaView>
       </Modal>
 
@@ -1890,6 +2608,28 @@ const styles = StyleSheet.create({
     borderColor: '#e2e8f0',
     marginBottom: 12,
   },
+  machineCardWarning: {
+    borderColor: '#f59e0b',
+    backgroundColor: '#fffbeb',
+  },
+  machineCardError: {
+    borderColor: '#ef4444',
+    backgroundColor: '#fef2f2',
+  },
+  cardIssueBox: {
+    marginTop: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    backgroundColor: '#fff7ed',
+    padding: 10,
+  },
+  cardIssueText: {
+    color: '#9a3412',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
   machineHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1946,6 +2686,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0f766e',
     marginBottom: 6,
+  },
+  qualitySummaryBox: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#d1fae5',
+    backgroundColor: '#f0fdf4',
+  },
+  qualitySummaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  qualitySummaryTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#14532d',
+  },
+  qualityWarningText: {
+    marginTop: 6,
+    color: '#b45309',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  qualityCheckButton: {
+    marginTop: 8,
+    flex: 0,
+    alignSelf: 'flex-start',
+    minWidth: 180,
+    backgroundColor: '#16a34a',
   },
   inactiveText: {
     marginTop: 10,
@@ -2172,6 +2944,30 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 8,
   },
+  protocolList: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    overflow: 'hidden',
+  },
+  protocolListItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  protocolListLabel: {
+    fontSize: 12,
+    color: '#475569',
+    fontWeight: '700',
+    marginBottom: 3,
+  },
+  protocolListValue: {
+    fontSize: 14,
+    color: '#0f172a',
+    fontWeight: '500',
+  },
   statusOption: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2223,6 +3019,85 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 15,
     fontWeight: '600',
+  },
+  qualityHistoryList: {
+    marginTop: 8,
+    gap: 8,
+  },
+  qualityHistoryItem: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderLeftWidth: 5,
+    borderLeftColor: '#cbd5e1',
+    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    padding: 10,
+  },
+  qualityHistoryHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 8,
+  },
+  qualityHistoryTitle: {
+    fontSize: 13,
+    color: '#0f172a',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  qualityCheckCodeBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+  },
+  qualityCheckCodeBadgeText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  protocolToggleButton: {
+    marginTop: 14,
+    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#94a3b8',
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+  },
+  protocolToggleButtonText: {
+    color: '#0f172a',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  protocolStatusCollectorButton: {
+    marginTop: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#1d4ed8',
+    alignItems: 'center',
+  },
+  protocolStatusCollectorText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  ioBox: {
+    marginTop: 12,
+    backgroundColor: '#ecfdf5',
+    borderColor: '#86efac',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+  },
+  ioText: {
+    color: '#14532d',
+    fontSize: 15,
+    fontWeight: '700',
   },
   targetButtonGroup: {
     flexDirection: 'row',

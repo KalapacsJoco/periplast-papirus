@@ -6,6 +6,7 @@ use App\Models\Order;
 use App\Models\Product;
 use App\Models\Error;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\ValidationException;
 
 $pauseRunningOrders = function (array $constraints, string $reason): void {
     $query = Order::query()->where('status', 'in_progress');
@@ -23,6 +24,36 @@ $pauseRunningOrders = function (array $constraints, string $reason): void {
             'bad_quantity' => $order->bad_quantity ?? 0,
         ]);
     });
+};
+
+$appendProtocolEntry = function (
+    Order $order,
+    int $currentQuantity,
+    string $entryType,
+    ?string $note = null,
+    array $meta = []
+): Order {
+    $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
+    $entries = is_array($protocol['entries'] ?? null) ? $protocol['entries'] : [];
+
+    $clampedQuantity = max(0, min($currentQuantity, (int) $order->quantity));
+
+    $entries[] = [
+        'timestamp' => now()->toIso8601String(),
+        'entry_type' => $entryType,
+        'current_quantity' => $clampedQuantity,
+        'note' => $note,
+        'meta' => $meta,
+    ];
+
+    $order->update([
+        'current_quantity' => $clampedQuantity,
+        'production_protocol' => array_merge($protocol, [
+            'entries' => $entries,
+        ]),
+    ]);
+
+    return $order->refresh();
 };
 
 Route::get('/machines', function () {
@@ -155,6 +186,7 @@ Route::post('/orders/{id}/status', function (Illuminate\Http\Request $request, $
     $validated = $request->validate([
         'status' => 'required|in:waiting,in_progress,paused,completed,interrupted',
         'pause_description' => 'nullable|string',
+        'current_quantity' => 'required|integer|min:0',
         'good_quantity' => 'required_if:status,completed,interrupted|integer|min:0',
         'bad_quantity' => 'required_if:status,completed,interrupted|integer|min:0',
     ]);
@@ -165,7 +197,8 @@ Route::post('/orders/{id}/status', function (Illuminate\Http\Request $request, $
     $pauseDescription = in_array($status, ['paused', 'interrupted'], true)
         ? ($validated['pause_description'] ?? null)
         : null;
-    $goodQuantity = $validated['good_quantity'] ?? $order->current_quantity ?? $order->good_quantity ?? 0;
+    $currentQuantity = max(0, min((int) $validated['current_quantity'], (int) $order->quantity));
+    $goodQuantity = $validated['good_quantity'] ?? $currentQuantity ?? $order->good_quantity ?? 0;
     $badQuantity = $validated['bad_quantity'] ?? $order->bad_quantity ?? 0;
 
     $startedAt = $order->started_at;
@@ -208,6 +241,7 @@ Route::post('/orders/{id}/status', function (Illuminate\Http\Request $request, $
         'started_at' => $startedAt,
         'ended_at' => $endedAt,
         'last_paused_at' => $lastPausedAt,
+        'current_quantity' => $currentQuantity,
         'good_quantity' => $goodQuantity,
         'bad_quantity' => $badQuantity,
     ]);
@@ -255,6 +289,7 @@ Route::post('/orders/{id}/protocol', function (Illuminate\Http\Request $request,
     ]);
 
     $order = Order::findOrFail($id);
+    $existingProtocol = is_array($order->production_protocol) ? $order->production_protocol : [];
 
     $order->update([
         'cycle_time' => $validated['cycle_time'] ?? $order->cycle_time,
@@ -262,7 +297,7 @@ Route::post('/orders/{id}/protocol', function (Illuminate\Http\Request $request,
         'gross_weight' => isset($validated['gross_weight']) ? (float) $validated['gross_weight'] : $order->gross_weight,
         'net_weight' => isset($validated['net_weight']) ? (float) $validated['net_weight'] : $order->net_weight,
         'color_percentage' => isset($validated['color_percentage']) ? (float) $validated['color_percentage'] : $order->color_percentage,
-        'production_protocol' => [
+        'production_protocol' => array_merge($existingProtocol, [
             'machine_name' => $validated['machine_name'] ?? $order->machine?->name,
             'part_code' => $validated['part_code'] ?? $order->product?->code,
             'material_code' => $validated['material_code'] ?? null,
@@ -273,8 +308,128 @@ Route::post('/orders/{id}/protocol', function (Illuminate\Http\Request $request,
             'quantity' => $validated['quantity'] ?? $order->quantity,
             'gross_weight' => isset($validated['gross_weight']) ? (float) $validated['gross_weight'] : null,
             'net_weight' => isset($validated['net_weight']) ? (float) $validated['net_weight'] : null,
-        ],
+            'quality_status' => $existingProtocol['quality_status'] ?? 'good',
+            'last_quality_check_at' => $existingProtocol['last_quality_check_at'] ?? null,
+            'quality_checks' => is_array($existingProtocol['quality_checks'] ?? null) ? $existingProtocol['quality_checks'] : [],
+        ]),
     ]);
+
+    return $order->load([
+        'machine:id,name,status,problem_description',
+        'mould:id,name,number,cavity_count,status,problem_description',
+        'product:id,name,code,is_active',
+    ]);
+});
+
+Route::post('/orders/{id}/quality-check', function (Illuminate\Http\Request $request, $id) use ($appendProtocolEntry) {
+    $validated = $request->validate([
+        'quality_status' => 'required|in:good,warning,quality_issue',
+        'problem_type' => 'nullable|required_unless:quality_status,good|in:surface_defect,dimension_issue,color_issue,material_issue,burn_mark,flash,short_shot,contamination,other',
+        'problem_note' => 'nullable|required_if:problem_type,other|string|max:2000',
+        'follow_up_status' => 'nullable|required_unless:quality_status,good|in:warning,stopped',
+        'resolution_note' => 'nullable|string|max:2000',
+        'current_quantity' => 'required|integer|min:0',
+    ]);
+
+    $order = Order::findOrFail($id);
+    $existingProtocol = is_array($order->production_protocol) ? $order->production_protocol : [];
+    $qualityChecks = is_array($existingProtocol['quality_checks'] ?? null) ? $existingProtocol['quality_checks'] : [];
+
+    $qualityStatus = $validated['quality_status'];
+    $previousQualityStatus = ($existingProtocol['quality_status'] ?? 'good');
+    $problemType = $validated['problem_type'] ?? null;
+    $problemNote = $validated['problem_note'] ?? null;
+    $resolutionNote = isset($validated['resolution_note']) ? trim((string) $validated['resolution_note']) : null;
+    $currentQuantity = max(0, min((int) $validated['current_quantity'], (int) $order->quantity));
+    $followUpStatus = $qualityStatus === 'good' ? null : ($validated['follow_up_status'] ?? 'warning');
+    $checkedAt = now();
+
+    if (
+        $qualityStatus === 'good'
+        && in_array($previousQualityStatus, ['warning', 'quality_issue'], true)
+        && ! $resolutionNote
+    ) {
+        throw ValidationException::withMessages([
+            'resolution_note' => ['Resolution note is required when quality status is restored to good.'],
+        ]);
+    }
+
+    $qualityChecks[] = [
+        'checked_at' => $checkedAt->toIso8601String(),
+        'quality_status' => $qualityStatus,
+        'protocol_entry' => $qualityStatus === 'good' ? 'IO' : ($problemType === 'other' ? (string) $problemNote : (string) $problemType),
+        'current_quantity' => $currentQuantity,
+        'problem_type' => $problemType,
+        'problem_note' => $problemType === 'other' ? $problemNote : null,
+        'follow_up_status' => $followUpStatus,
+        'resolved_from_status' => $qualityStatus === 'good' ? $previousQualityStatus : null,
+        'resolution_note' => $qualityStatus === 'good' ? $resolutionNote : null,
+    ];
+
+    $newOrderStatus = $order->status;
+    $pauseDescription = $order->pause_description;
+    $lastPausedAt = $order->last_paused_at;
+
+    if ($followUpStatus === 'stopped' && $order->status === 'in_progress') {
+        $newOrderStatus = 'paused';
+        $pauseDescription = 'Paused by quality check';
+        $lastPausedAt = now();
+    }
+
+    $order->update([
+        'status' => $newOrderStatus,
+        'pause_description' => $pauseDescription,
+        'last_paused_at' => $lastPausedAt,
+        'current_quantity' => $currentQuantity,
+        'production_protocol' => array_merge($existingProtocol, [
+            'quality_status' => $qualityStatus,
+            'last_quality_check_at' => $checkedAt->toIso8601String(),
+            'quality_checks' => $qualityChecks,
+        ]),
+    ]);
+
+    $protocolEntryNote = $qualityStatus === 'good'
+        ? ($resolutionNote ?: 'Quality restored to IO')
+        : ($problemType === 'other' ? (string) $problemNote : (string) $problemType);
+
+    $entryMeta = [
+        'quality_status' => $qualityStatus,
+        'follow_up_status' => $followUpStatus,
+        'problem_type' => $problemType,
+        'resolution_note' => $qualityStatus === 'good' ? $resolutionNote : null,
+    ];
+
+    $order = $appendProtocolEntry(
+        $order,
+        $currentQuantity,
+        'quality_check',
+        $protocolEntryNote,
+        $entryMeta,
+    );
+
+    return $order->load([
+        'machine:id,name,status,problem_description',
+        'mould:id,name,number,cavity_count,status,problem_description',
+        'product:id,name,code,is_active',
+    ]);
+});
+
+Route::post('/orders/{id}/protocol-entry', function (Illuminate\Http\Request $request, $id) use ($appendProtocolEntry) {
+    $validated = $request->validate([
+        'current_quantity' => 'required|integer|min:0',
+        'entry_type' => 'required|in:quality_check,order_status,machine_issue,mould_issue,product_status,protocol_update,note',
+        'note' => 'nullable|string|max:2000',
+        'meta' => 'nullable|array',
+    ]);
+
+    $order = Order::findOrFail($id);
+    $order = $appendProtocolEntry(
+        $order,
+        (int) $validated['current_quantity'],
+        $validated['entry_type'],
+        $validated['note'] ?? null,
+        $validated['meta'] ?? [],
+    );
 
     return $order->load([
         'machine:id,name,status,problem_description',
