@@ -18,6 +18,7 @@ class Product extends Model
         'customer_code',
         'material_id',
         'color_id',
+        'planned_cycle_time',
         'description',
         'is_active',
     ];

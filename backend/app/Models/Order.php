@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Order extends Model
 {
@@ -51,6 +52,11 @@ class Order extends Model
         'additives_percentages' => 'array',
         'production_protocol' => 'array',
     ];
+
+    public function dailyCounts(): HasMany
+    {
+        return $this->hasMany(OrderDailyCount::class);
+    }
 
     public function machine(): BelongsTo
     {

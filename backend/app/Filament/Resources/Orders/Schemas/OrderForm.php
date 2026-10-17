@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Orders\Schemas;
 
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
@@ -16,6 +17,16 @@ class OrderForm
                 TextInput::make('order_number')
                     ->unique(ignoreRecord: true)
                     ->prefix('ORD-')
+                    ->required(),
+                DatePicker::make('date')
+                    ->default(now())
+                    ->required(),
+                TextInput::make('customer')
+                    ->required(),
+                TextInput::make('quantity')
+                    ->numeric()
+                    ->integer()
+                    ->minValue(1)
                     ->required(),
                 Select::make('machine_id')
                     ->relationship('machine', 'name')
