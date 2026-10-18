@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 # Laravel Forge deploy script. Paste this into the site's "Deploy script" editor
-# (or call `bash backend/deploy.sh`). Site settings required in Forge:
-#   - Web directory: backend/public
+# (or call `bash deploy.sh`). Site settings required in Forge:
+#   - Web directory: public
 #   - Zero downtime deployments: off
-#   - .env symlink on the server (once): ln -s ../.env backend/.env
 set -e
 
 cd "$FORGE_SITE_PATH"
 git pull origin "$FORGE_SITE_BRANCH"
-
-cd backend
 
 $FORGE_COMPOSER install --no-dev --no-interaction --prefer-dist --optimize-autoloader
 
