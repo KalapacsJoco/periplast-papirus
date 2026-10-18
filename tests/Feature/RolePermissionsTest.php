@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\Role;
 use App\Models\Machine;
+use App\Models\Mould;
 use App\Models\Order;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -18,9 +19,9 @@ class RolePermissionsTest extends TestCase
     {
         $this->assertSame([Role::PERMISSION_ALL], Role::Admin->permissions());
         $this->assertSame([Role::ACTIVATE_ORDER, Role::PAUSE_ORDER, Role::INTERRUPT_ORDER], Role::Programmer->permissions());
-        $this->assertSame([Role::ASSIGN_ORDER, Role::START_MACHINE, Role::STOP_MACHINE, Role::CHECK_QUALITY], Role::Coordinator->permissions());
-        $this->assertSame([Role::START_MACHINE, Role::STOP_MACHINE, Role::CHECK_COLOR], Role::Operator->permissions());
-        $this->assertSame([Role::CHECK_QUALITY, Role::STOP_MACHINE], Role::QualityManager->permissions());
+        $this->assertSame([Role::ASSIGN_ORDER, Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHECK_QUALITY], Role::Coordinator->permissions());
+        $this->assertSame([Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHECK_COLOR], Role::Operator->permissions());
+        $this->assertSame([Role::CHECK_QUALITY, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING], Role::QualityManager->permissions());
     }
 
     public function test_programmer_order_activation_notifies_coordinator_and_all_operators(): void
@@ -134,7 +135,44 @@ class RolePermissionsTest extends TestCase
         $this->assertSame('color', $order->fresh()->production_protocol['quality_checks'][0]['check_type']);
     }
 
-    public function test_quality_manager_cannot_start_a_machine(): void
+    public function test_coordinator_and_operator_can_set_machine_statuses(): void
+    {
+        foreach ([Role::Coordinator, Role::Operator] as $role) {
+            $user = User::factory()->create(['role' => $role]);
+            $machine = Machine::factory()->create(['status' => 'stopped']);
+
+            foreach (['active', 'warning', 'stopped'] as $status) {
+                Livewire::actingAs($user)
+                    ->test('production-dashboard')
+                    ->call('openMachineModal', $machine->id)
+                    ->set('status', $status)
+                    ->set('problemDescription', $status === 'warning' ? 'Scheduled maintenance' : '')
+                    ->call('saveMachineStatus')
+                    ->assertHasNoErrors();
+
+                $this->assertSame($status, $machine->fresh()->status);
+            }
+        }
+    }
+
+    public function test_machine_card_displays_the_saved_machine_status(): void
+    {
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $machine = Machine::factory()->create(['name' => 'Status test machine', 'status' => 'active']);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->assertSee('Aktív')
+            ->call('openMachineModal', $machine->id)
+            ->set('status', 'warning')
+            ->set('problemDescription', 'Scheduled inspection')
+            ->call('saveMachineStatus')
+            ->assertSee('Figyelmeztetés')
+            ->assertSee('bg-amber-100')
+            ->assertSee('Scheduled inspection');
+    }
+
+    public function test_quality_manager_can_warn_or_stop_but_not_start_a_machine(): void
     {
         $qualityManager = User::factory()->create(['role' => Role::QualityManager]);
         $machine = Machine::factory()->create(['status' => 'stopped']);
@@ -147,6 +185,49 @@ class RolePermissionsTest extends TestCase
             ->assertForbidden();
 
         $this->assertSame('stopped', $machine->fresh()->status);
+
+        foreach (['warning', 'stopped'] as $status) {
+            Livewire::actingAs($qualityManager)
+                ->test('production-dashboard')
+                ->call('openMachineModal', $machine->id)
+                ->set('status', $status)
+                ->set('problemDescription', $status === 'warning' ? 'Maintenance needed' : '')
+                ->call('saveMachineStatus')
+                ->assertHasNoErrors();
+
+            $this->assertSame($status, $machine->fresh()->status);
+        }
+    }
+
+    public function test_coordinator_operator_and_quality_manager_can_add_mould_warnings_only(): void
+    {
+        foreach ([Role::Coordinator, Role::Operator, Role::QualityManager] as $role) {
+            $user = User::factory()->create(['role' => $role]);
+            $mould = Mould::factory()->create(['status' => 'active']);
+
+            Livewire::actingAs($user)
+                ->test('production-dashboard')
+                ->call('openMouldModal', $mould->id)
+                ->set('status', 'warning')
+                ->set('problemDescription', 'Tool needs inspection')
+                ->call('saveMouldStatus')
+                ->assertHasNoErrors();
+
+            $this->assertSame('warning', $mould->fresh()->status);
+            $this->assertSame('Tool needs inspection', $mould->fresh()->problem_description);
+        }
+
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $mould = Mould::factory()->create(['status' => 'active']);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openMouldModal', $mould->id)
+            ->set('status', 'active')
+            ->call('saveMouldStatus')
+            ->assertForbidden();
+
+        $this->assertSame('active', $mould->fresh()->status);
     }
 
     public function test_programmer_cannot_complete_an_order(): void

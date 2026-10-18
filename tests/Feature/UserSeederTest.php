@@ -26,6 +26,7 @@ class UserSeederTest extends TestCase
             Role::ASSIGN_ORDER,
             Role::START_MACHINE,
             Role::STOP_MACHINE,
+            Role::REPORT_EQUIPMENT_WARNING,
             Role::CHECK_QUALITY,
         ], $user->role->permissions());
     }

@@ -11,13 +11,23 @@ enum Role: string
     case Coordinator = 'coordinator';
 
     public const PERMISSION_ALL = '*';
+
     public const ACTIVATE_ORDER = 'order.activate';
+
     public const PAUSE_ORDER = 'order.pause';
+
     public const INTERRUPT_ORDER = 'order.interrupt';
+
     public const ASSIGN_ORDER = 'order.assign';
+
     public const START_MACHINE = 'machine.start';
+
     public const STOP_MACHINE = 'machine.stop';
+
+    public const REPORT_EQUIPMENT_WARNING = 'equipment.report_warning';
+
     public const CHECK_QUALITY = 'quality.check';
+
     public const CHECK_COLOR = 'quality.check_color';
 
     /** @return array<int, string> */
@@ -26,9 +36,9 @@ enum Role: string
         return match ($this) {
             self::Admin => [self::PERMISSION_ALL],
             self::Programmer => [self::ACTIVATE_ORDER, self::PAUSE_ORDER, self::INTERRUPT_ORDER],
-            self::Operator => [self::START_MACHINE, self::STOP_MACHINE, self::CHECK_COLOR],
-            self::QualityManager => [self::CHECK_QUALITY, self::STOP_MACHINE],
-            self::Coordinator => [self::ASSIGN_ORDER, self::START_MACHINE, self::STOP_MACHINE, self::CHECK_QUALITY],
+            self::Operator => [self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_COLOR],
+            self::QualityManager => [self::CHECK_QUALITY, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING],
+            self::Coordinator => [self::ASSIGN_ORDER, self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_QUALITY],
         };
     }
 
