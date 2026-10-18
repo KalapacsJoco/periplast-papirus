@@ -6,9 +6,11 @@ use App\Enums\Role;
 use App\Models\Machine;
 use App\Models\Mould;
 use App\Models\Order;
+use App\Models\Product;
 use App\Models\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -142,12 +144,11 @@ class RolePermissionsTest extends TestCase
             ->call('selectTab', 'tasks')
             ->assertSee($order->order_number)
             ->call('startAssignedTask', $order->id)
-            ->assertSee('Szerelés alatt');
+            ->assertDontSee($order->order_number)
+            ->assertSee('Jelenleg nincs hozzád rendelt feladat.');
 
         $this->assertSame('setup', $order->machine->fresh()->status);
         $this->assertNotNull($order->fresh()->task_started_at);
-
-        $this->assertSame('setup', $order->machine->fresh()->status);
 
         try {
             Livewire::actingAs($otherOperator)
@@ -157,6 +158,132 @@ class RolePermissionsTest extends TestCase
             $this->fail('An operator cannot start another operator’s task.');
         } catch (ModelNotFoundException) {
         }
+    }
+
+    public function test_machine_card_shows_expected_quantity_from_cavities_and_cycle_time(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-10-18 12:00:00'));
+
+        try {
+            $operator = User::factory()->create(['role' => Role::Operator]);
+            $order = Order::factory()->create([
+                'status' => 'in_progress',
+                'quantity' => 1000,
+                'current_quantity' => 30,
+                'started_at' => now()->subHours(2),
+                'production_protocol' => ['quality_checks' => [
+                    ['checked_at' => now()->subSeconds(500)->toIso8601String(), 'quality_status' => 'warning'],
+                    ['checked_at' => now()->subSeconds(100)->toIso8601String(), 'quality_status' => 'good'],
+                    ['checked_at' => now()->subSeconds(50)->toIso8601String(), 'quality_status' => 'good'],
+                ]],
+                'mould_id' => Mould::factory()->create(['cavity_count' => 4])->id,
+                'product_id' => Product::factory()->create(['planned_cycle_time' => 10000])->id,
+            ]);
+
+            $this->assertSame(40, Livewire::actingAs($operator)->test('production-dashboard')->instance()->expectedQuantity($order->load(['mould', 'product'])));
+
+            Livewire::actingAs($operator)
+                ->test('production-dashboard')
+                ->assertSee('Elméleti mennyiség: 40 db')
+                ->assertSee('bg-red-400');
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_expected_quantity_is_not_shown_before_first_good_quality_check(): void
+    {
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $order = Order::factory()->create([
+            'status' => 'in_progress',
+            'quantity' => 1000,
+            'started_at' => now()->subHour(),
+            'mould_id' => Mould::factory()->create(['cavity_count' => 4])->id,
+            'product_id' => Product::factory()->create(['planned_cycle_time' => 10000])->id,
+            'production_protocol' => ['quality_checks' => [
+                ['checked_at' => now()->subMinutes(5)->toIso8601String(), 'quality_status' => 'quality_issue'],
+            ]],
+        ]);
+
+        $component = Livewire::actingAs($operator)->test('production-dashboard');
+
+        $this->assertNull($component->instance()->expectedQuantity($order->load(['mould', 'product'])));
+        $component->assertDontSee('Elméleti mennyiség:');
+    }
+
+    public function test_quality_check_asks_for_confirmation_when_quantity_is_below_last_or_above_expected(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-10-18 12:00:00'));
+
+        try {
+            $qualityManager = User::factory()->create(['role' => Role::QualityManager]);
+            $order = Order::factory()->create([
+                'status' => 'in_progress',
+                'quantity' => 1000,
+                'current_quantity' => 30,
+                'mould_id' => Mould::factory()->create(['cavity_count' => 4])->id,
+                'product_id' => Product::factory()->create(['planned_cycle_time' => 10000])->id,
+                'production_protocol' => ['quality_checks' => [
+                    ['checked_at' => now()->subSeconds(100)->toIso8601String(), 'quality_status' => 'good'],
+                ]],
+            ]);
+
+            Livewire::actingAs($qualityManager)
+                ->test('production-dashboard')
+                ->call('openQualityModal', $order->id)
+                ->set('currentQuantity', 20)
+                ->call('saveQualityCheck')
+                ->assertSet('showQualityModal', true)
+                ->assertSee('kisebb, mint a legutóbb bevitt (30 db)')
+                ->assertSee('Biztosan módosítani szeretnéd')
+                ->call('saveQualityCheck', true)
+                ->assertSet('showQualityModal', false);
+
+            $this->assertSame(20, $order->fresh()->current_quantity);
+
+            Livewire::actingAs($qualityManager)
+                ->test('production-dashboard')
+                ->call('openQualityModal', $order->id)
+                ->set('currentQuantity', 41)
+                ->call('saveQualityCheck')
+                ->assertSet('showQualityModal', true)
+                ->assertSee('nagyobb, mint az elméleti darabszám (40 db)');
+
+            $this->assertSame(20, $order->fresh()->current_quantity);
+
+            Livewire::actingAs($qualityManager)
+                ->test('production-dashboard')
+                ->call('openQualityModal', $order->id)
+                ->set('currentQuantity', 40)
+                ->call('saveQualityCheck')
+                ->assertSet('showQualityModal', false);
+
+            $this->assertSame(40, $order->fresh()->current_quantity);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_operator_task_list_hides_tasks_that_have_already_started(): void
+    {
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $startedOrder = Order::factory()->create([
+            'order_number' => 'ORD-STARTED',
+            'status' => 'in_progress',
+            'assigned_operator_id' => $operator->id,
+            'task_started_at' => now(),
+        ]);
+        $queuedOrder = Order::factory()->create([
+            'order_number' => 'ORD-QUEUED',
+            'status' => 'in_progress',
+            'assigned_operator_id' => $operator->id,
+        ]);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('selectTab', 'tasks')
+            ->assertDontSee($startedOrder->order_number)
+            ->assertSee($queuedOrder->order_number);
     }
 
     public function test_all_roles_can_view_orders_but_only_programmer_can_activate_them(): void

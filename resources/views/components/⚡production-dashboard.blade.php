@@ -57,6 +57,8 @@ new class extends Component
 
     public string $qualityStatus = 'good';
 
+    public string $quantityWarning = '';
+
     public string $qualityProblemType = 'surface_defect';
 
     public string $qualityProblemNote = '';
@@ -195,7 +197,7 @@ new class extends Component
         return Machine::query()
             ->with(['orders' => fn ($query) => $query
                 ->whereIn('status', ['in_progress', 'paused'])
-                ->with(['mould:id,name,number,cavity_count', 'product:id,name,code'])
+                ->with(['mould:id,name,number,cavity_count', 'product:id,name,code,planned_cycle_time'])
                 ->orderByDesc('started_at')])
             ->orderBy('name')
             ->get();
@@ -262,6 +264,7 @@ new class extends Component
         return Order::query()
             ->where('assigned_operator_id', Auth::id())
             ->whereIn('status', ['in_progress', 'paused'])
+            ->whereNull('task_started_at')
             ->with(['machine:id,name,status', 'product:id,name,code'])
             ->orderBy('order_number')
             ->get();
@@ -526,11 +529,12 @@ new class extends Component
             ? 'color_issue'
             : 'surface_defect';
         $this->qualityProblemNote = '';
+        $this->quantityWarning = '';
         $this->resetValidation();
         $this->showQualityModal = true;
     }
 
-    public function saveQualityCheck(): void
+    public function saveQualityCheck(bool $confirmed = false): void
     {
         $this->ensurePermission(Role::CHECK_QUALITY, Role::CHECK_COLOR);
         $isColorCheck = ! $this->canDo(Role::CHECK_QUALITY);
@@ -543,6 +547,25 @@ new class extends Component
 
         $order = Order::findOrFail($this->qualityOrderId);
         $quantity = min($validated['currentQuantity'], $order->quantity);
+
+        if (! $confirmed) {
+            $expectedQuantity = $this->expectedQuantity($order);
+
+            if ($quantity < $order->current_quantity) {
+                $this->quantityWarning = $this->t('quantity_below_last_warning', ['last' => $order->current_quantity]);
+
+                return;
+            }
+
+            if ($expectedQuantity !== null && $quantity > $expectedQuantity) {
+                $this->quantityWarning = $this->t('quantity_above_expected_warning', ['expected' => $expectedQuantity]);
+
+                return;
+            }
+        }
+
+        $this->quantityWarning = '';
+
         $protocol = $order->production_protocol ?? [];
         $checks = $protocol['quality_checks'] ?? [];
         $checks[] = [
@@ -746,6 +769,38 @@ new class extends Component
     public function progress(Order $order): int
     {
         return $order->quantity > 0 ? min(100, (int) round(($order->current_quantity / $order->quantity) * 100)) : 0;
+    }
+
+    public function productionStartedAt(Order $order): ?Carbon
+    {
+        $checks = collect(data_get($order->production_protocol, 'quality_checks', []))
+            ->filter(fn ($check) => is_array($check) && ($check['quality_status'] ?? null) === 'good' && ! empty($check['checked_at']))
+            ->map(fn (array $check) => Carbon::parse($check['checked_at']));
+
+        return $checks->isEmpty() ? null : $checks->min();
+    }
+
+    public function expectedQuantity(Order $order): ?int
+    {
+        $cycleMs = $order->product?->planned_cycle_time ?: $order->cycle_time;
+        $cavities = $order->mould?->cavity_count;
+        $startedAt = $this->productionStartedAt($order);
+
+        if (! $startedAt || ! $cycleMs || ! $cavities || $order->quantity <= 0) {
+            return null;
+        }
+
+        $end = $order->ended_at ?? ($order->status === 'paused' ? $order->last_paused_at : null) ?? now();
+        $elapsedMs = max(0, $startedAt->diffInMilliseconds($end, false));
+
+        return (int) min($order->quantity, floor($elapsedMs / $cycleMs) * $cavities);
+    }
+
+    public function expectedProgress(Order $order): ?int
+    {
+        $expected = $this->expectedQuantity($order);
+
+        return $expected === null ? null : (int) round($expected / $order->quantity * 100);
     }
 
     public function qualityStatus(Order $order): string
@@ -962,7 +1017,7 @@ new class extends Component
                                             @endif
                                         </div>
                                         <div class="mt-4 flex justify-between text-sm"><span>{{ $this->t('current_quantity') }}</span><strong>{{ $order->current_quantity }} / {{ $order->quantity }} db</strong></div>
-                                        <div class="mt-2 h-2 overflow-hidden rounded-full bg-teal-100"><div class="h-full rounded-full bg-teal-600" style="width: {{ $this->progress($order) }}%"></div></div>
+                                        @include('partials.production-progress-bar', ['order' => $order])
                                         <div class="mt-4 flex flex-wrap gap-2">
                                             <span wire:key="quality-status-{{ $order->id }}-{{ $this->qualityStatus($order) }}" @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($this->qualityStatus($order))])>
                                                 {{ $this->t('quality') }}: {{ $this->statusLabel($this->qualityStatus($order)) }}
@@ -1029,11 +1084,7 @@ new class extends Component
                                     <p class="text-sm text-slate-500">{{ $order->machine?->name }} · {{ $order->product?->name }}</p>
                                     <p class="mt-2 text-sm">{{ $this->t('status') }}: {{ $this->statusLabel($order->status) }}</p>
                                     <p class="mt-1 text-sm">{{ $this->t('current_quantity') }}: {{ $order->current_quantity }} / {{ $order->quantity }}</p>
-                                    @if ($order->status === 'in_progress' && ! $order->task_started_at)
-                                        <button wire:click="startAssignedTask({{ $order->id }})" class="mt-3 rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t('start_task') }}</button>
-                                    @elseif ($order->task_started_at)
-                                        <p class="mt-3 text-sm font-semibold text-blue-800">{{ $order->machine?->status === 'setup' ? $this->t('setup') : $this->t('task_in_progress') }}</p>
-                                    @endif
+                                    <button wire:click="startAssignedTask({{ $order->id }})" class="mt-3 rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t('start_task') }}</button>
                                 </div>
                             @empty
                                 <p class="text-sm text-slate-500 md:col-span-2">{{ $this->t('no_assignments') }}</p>
@@ -1186,10 +1237,10 @@ new class extends Component
                                 <div><dt class="text-slate-500">{{ $this->t('actual_cycle') }}</dt><dd class="font-semibold">{{ $detailOrder->cycle_time ? number_format($detailOrder->cycle_time / 1000, 1, ',', ' ').' s' : '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('net_weight') }}</dt><dd class="font-semibold">{{ $detailOrder->net_weight !== null ? $detailOrder->net_weight.' g' : '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('gross_weight') }}</dt><dd class="font-semibold">{{ $detailOrder->gross_weight !== null ? $detailOrder->gross_weight.' g' : '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('started_at') }}</dt><dd class="font-semibold">{{ $detailOrder->started_at?->format('Y-m-d H:i') ?? '-' }}</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('started_at') }}</dt><dd class="font-semibold">{{ $this->productionStartedAt($detailOrder)?->format('Y-m-d H:i') ?? '-' }}</dd></div>
                             </dl>
                             <div class="mt-4 flex justify-between text-sm"><span>{{ $this->t('current_quantity') }}</span><strong>{{ $detailOrder->current_quantity }} / {{ $detailOrder->quantity }} db</strong></div>
-                            <div class="mt-2 h-2 overflow-hidden rounded-full bg-teal-100"><div class="h-full rounded-full bg-teal-600" style="width: {{ $this->progress($detailOrder) }}%"></div></div>
+                            @include('partials.production-progress-bar', ['order' => $detailOrder])
                             <div class="mt-3">
                                 <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($this->qualityStatus($detailOrder))])>{{ $this->t('quality') }}: {{ $this->statusLabel($this->qualityStatus($detailOrder)) }}</span>
                             </div>
@@ -1295,7 +1346,7 @@ new class extends Component
     @endif
 
     @if ($showQualityModal)
-        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold">{{ $this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'record_color_check' : 'record_quality_check') }}</h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold">{{ $this->t('result') }}<select wire:model.live="qualityStatus" class="mt-1 w-full rounded-md border-slate-300"><option value="good">{{ $this->t('good') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="quality_issue">{{ $this->t('quality_issue') }}</option></select></label><label class="text-sm font-semibold">{{ $this->t('current_quantity') }}<input wire:model="currentQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@if($qualityStatus !== 'good')<div wire:key="quality-problem-fields-{{ $qualityStatus }}" class="grid gap-4"><label class="text-sm font-semibold">{{ $this->t('problem_type') }}<select wire:model="qualityProblemType" class="mt-1 w-full rounded-md border-slate-300">@if ($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY))<option value="color_issue">{{ $this->t('color_issue') }}</option>@else<option value="surface_defect">{{ $this->t('surface_defect') }}</option><option value="dimension_issue">{{ $this->t('dimension_issue') }}</option><option value="color_issue">{{ $this->t('color_issue') }}</option><option value="material_issue">{{ $this->t('material_issue') }}</option><option value="burn_mark">{{ $this->t('burn_mark') }}</option><option value="flash">{{ $this->t('flash') }}</option><option value="short_shot">{{ $this->t('short_shot') }}</option><option value="contamination">{{ $this->t('contamination') }}</option><option value="other">{{ $this->t('other') }}</option>@endif</select></label><label class="text-sm font-semibold">{{ $this->t('problem_reason') }}<textarea wire:model="qualityProblemNote" rows="3" placeholder="{{ $this->t('problem_reason_placeholder') }}" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('qualityProblemNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label></div>@endif</div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showQualityModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="saveQualityCheck" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('record') }}</button></div></div></div>
+        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold">{{ $this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'record_color_check' : 'record_quality_check') }}</h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold">{{ $this->t('result') }}<select wire:model.live="qualityStatus" class="mt-1 w-full rounded-md border-slate-300"><option value="good">{{ $this->t('good') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="quality_issue">{{ $this->t('quality_issue') }}</option></select></label><label class="text-sm font-semibold">{{ $this->t('current_quantity') }}<input wire:model="currentQuantity" wire:input="$set('quantityWarning', '')" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@if($quantityWarning !== '')<div class="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert"><p class="font-semibold">{{ $quantityWarning }}</p><p class="mt-1">{{ $this->t('quantity_confirm_question') }}</p><div class="mt-3 flex gap-2"><button wire:click="saveQualityCheck(true)" class="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700">{{ $this->t('quantity_confirm_yes') }}</button><button wire:click="$set('quantityWarning', '')" class="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-bold text-amber-900">{{ $this->t('quantity_confirm_edit') }}</button></div></div>@endif@if($qualityStatus !== 'good')<div wire:key="quality-problem-fields-{{ $qualityStatus }}" class="grid gap-4"><label class="text-sm font-semibold">{{ $this->t('problem_type') }}<select wire:model="qualityProblemType" class="mt-1 w-full rounded-md border-slate-300">@if ($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY))<option value="color_issue">{{ $this->t('color_issue') }}</option>@else<option value="surface_defect">{{ $this->t('surface_defect') }}</option><option value="dimension_issue">{{ $this->t('dimension_issue') }}</option><option value="color_issue">{{ $this->t('color_issue') }}</option><option value="material_issue">{{ $this->t('material_issue') }}</option><option value="burn_mark">{{ $this->t('burn_mark') }}</option><option value="flash">{{ $this->t('flash') }}</option><option value="short_shot">{{ $this->t('short_shot') }}</option><option value="contamination">{{ $this->t('contamination') }}</option><option value="other">{{ $this->t('other') }}</option>@endif</select></label><label class="text-sm font-semibold">{{ $this->t('problem_reason') }}<textarea wire:model="qualityProblemNote" rows="3" placeholder="{{ $this->t('problem_reason_placeholder') }}" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('qualityProblemNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label></div>@endif</div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showQualityModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="saveQualityCheck" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('record') }}</button></div></div></div>
     @endif
     @endguest
 </div>
