@@ -12,7 +12,12 @@ class UserSeeder extends Seeder
         ['Admin', 'admin@periplast.ro', Role::Admin],
         ['Programmer', 'programmer@periplast.ro', Role::Programmer],
         ['Operator', 'operator@periplast.ro', Role::Operator],
+        ['Fancsali Arpad', 'fancsali@periplast.ro', Role::Operator],
+        ['Balazs Csaba', 'balazs@periplast.ro', Role::Operator],
+        ['Vajna Karoly', 'vajna@periplast.ro', Role::Operator],
+        ['Derzsi Karoly', 'derzsi@periplast.ro', Role::Operator],
         ['Quality Manager', 'qm@periplast.ro', Role::QualityManager],
+        ['Coordinator', 'coordinator@periplast.ro', Role::Coordinator],
     ];
 
     public function run(): void

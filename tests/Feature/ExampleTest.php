@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Enums\Role;
 use App\Models\Order;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -23,13 +25,14 @@ class ExampleTest extends TestCase
 
     public function test_quality_issue_pauses_production_and_persists_the_quality_status(): void
     {
+        $qualityManager = User::factory()->create(['role' => Role::QualityManager]);
         $order = Order::factory()->create([
             'status' => 'in_progress',
             'quantity' => 100,
             'current_quantity' => 25,
         ]);
 
-        Livewire::test('production-dashboard')
+        Livewire::actingAs($qualityManager)->test('production-dashboard')
             ->call('openQualityModal', $order->id)
             ->set('qualityStatus', 'quality_issue')
             ->set('currentQuantity', 25)
@@ -48,13 +51,14 @@ class ExampleTest extends TestCase
 
     public function test_quality_warning_is_shown_on_the_machine_card_without_pausing_production(): void
     {
+        $qualityManager = User::factory()->create(['role' => Role::QualityManager]);
         $order = Order::factory()->create([
             'status' => 'in_progress',
             'quantity' => 100,
             'current_quantity' => 25,
         ]);
 
-        Livewire::test('production-dashboard')
+        Livewire::actingAs($qualityManager)->test('production-dashboard')
             ->call('openQualityModal', $order->id)
             ->set('qualityStatus', 'warning')
             ->set('currentQuantity', 25)
@@ -72,7 +76,9 @@ class ExampleTest extends TestCase
 
     public function test_dashboard_can_be_switched_to_german(): void
     {
-        Livewire::test('production-dashboard')
+        $admin = User::factory()->create(['role' => Role::Admin]);
+
+        Livewire::actingAs($admin)->test('production-dashboard')
             ->call('selectLanguage', 'de')
             ->assertSet('locale', 'de')
             ->assertSee('Maschinen')

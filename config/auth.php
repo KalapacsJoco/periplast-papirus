@@ -42,6 +42,11 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
+
+        'papirus-tab' => [
+            'driver' => 'papirus-tab',
+            'provider' => 'users',
+        ],
     ],
 
     /*

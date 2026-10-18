@@ -16,6 +16,7 @@ class Order extends Model
         'machine_id',
         'mould_id',
         'product_id',
+        'assigned_operator_id',
         'date',
         'customer',
         'quantity',
@@ -71,5 +72,10 @@ class Order extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function assignedOperator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_operator_id');
     }
 }
