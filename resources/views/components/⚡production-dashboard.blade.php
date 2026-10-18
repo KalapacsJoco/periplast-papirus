@@ -253,6 +253,8 @@ new class extends Component
     {
         return Order::query()
             ->whereIn('status', ['in_progress', 'paused'])
+            ->whereNotNull('activated_at')
+            ->whereNull('task_started_at')
             ->with(['machine:id,name', 'product:id,name,code', 'assignedOperator:id,name'])
             ->orderBy('order_number')
             ->get();
@@ -509,7 +511,12 @@ new class extends Component
         $this->ensurePermission(Role::ACTIVATE_ORDER);
         $order = Order::findOrFail($orderId);
         abort_unless(in_array($order->status, ['waiting', 'paused'], true), 422);
-        $order->update(['status' => 'in_progress', 'started_at' => $order->started_at ?? now(), 'last_paused_at' => null]);
+        $order->update([
+            'status' => 'in_progress',
+            'started_at' => $order->started_at ?? now(),
+            'activated_at' => $order->status === 'waiting' ? now() : $order->activated_at,
+            'last_paused_at' => null,
+        ]);
         $this->appendProtocolEntry($order->refresh(), $order->current_quantity, 'order_status', $this->t('order_activated_note'));
         if (Auth::user()->role === Role::Programmer) {
             $this->notifyWorkflowRecipients($order->refresh(), 'activated');

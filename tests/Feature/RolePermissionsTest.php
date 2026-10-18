@@ -117,7 +117,8 @@ class RolePermissionsTest extends TestCase
     public function test_coordinator_tasks_only_list_activated_orders_and_orders_page_has_no_assignment_section(): void
     {
         $coordinator = User::factory()->create(['role' => Role::Coordinator]);
-        $activatedOrder = Order::factory()->create(['order_number' => 'ORD-ACTIVE', 'status' => 'in_progress']);
+        $activatedOrder = Order::factory()->create(['order_number' => 'ORD-ACTIVE', 'status' => 'in_progress', 'activated_at' => now()]);
+        $runningOrder = Order::factory()->create(['order_number' => 'ORD-RUNNING', 'status' => 'in_progress']);
         $waitingOrder = Order::factory()->create(['order_number' => 'ORD-WAITING', 'status' => 'waiting']);
 
         Livewire::actingAs($coordinator)
@@ -125,6 +126,7 @@ class RolePermissionsTest extends TestCase
             ->call('selectTab', 'tasks')
             ->assertSet('activeTab', 'tasks')
             ->assertSee($activatedOrder->order_number)
+            ->assertDontSee($runningOrder->order_number)
             ->assertDontSee($waitingOrder->order_number)
             ->call('selectTab', 'orders')
             ->assertDontSee('Operátori feladatkiosztás');
