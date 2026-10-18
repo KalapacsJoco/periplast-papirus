@@ -43,6 +43,17 @@ new class extends Component
 
     public bool $showProtocolModal = false;
 
+    public bool $showCalculatorModal = false;
+
+    public ?int $calcProductId = null;
+
+    public ?int $calcMouldId = null;
+
+    public $calcCavities = null;
+
+    public $calcCycleSeconds = null;
+
+    public $calcQuantity = null;
     public string $status = '';
 
     public string $problemDescription = '';
@@ -169,7 +180,7 @@ new class extends Component
     {
         return match ($tab) {
             'machines' => true,
-            'orders' => true,
+            'orders', 'notifications', 'maintenance', 'calculators' => true,
             'tasks' => $this->isAdmin() || $this->canDo(Role::ASSIGN_ORDER) || $this->canDo(Role::CHECK_COLOR),
             'moulds', 'products' => $this->isAdmin(),
             default => false,
@@ -284,13 +295,47 @@ new class extends Component
     #[Computed]
     public function notifications()
     {
-        return Auth::user()->notifications()->latest()->limit(10)->get();
+        return Auth::user()->notifications()->latest()->limit(50)->get();
     }
 
     #[Computed]
     public function unreadNotificationCount(): int
     {
         return Auth::user()->unreadNotifications()->count();
+    }
+
+    public function openCalculator(): void
+    {
+        $this->reset(['calcProductId', 'calcMouldId', 'calcCavities', 'calcCycleSeconds', 'calcQuantity']);
+        $this->showCalculatorModal = true;
+    }
+
+    public function updatedCalcProductId(): void
+    {
+        $product = $this->calcProductId ? Product::query()->with('moulds:id,name,number,cavity_count')->find($this->calcProductId) : null;
+        $mould = $product?->moulds->first();
+
+        $this->calcMouldId = $mould?->id;
+        $this->calcCavities = $mould?->cavity_count;
+        $this->calcCycleSeconds = $product?->planned_cycle_time ? round($product->planned_cycle_time / 1000, 2) : null;
+    }
+
+    public function updatedCalcMouldId(): void
+    {
+        $this->calcCavities = $this->calcMouldId ? Mould::query()->find($this->calcMouldId)?->cavity_count : null;
+    }
+
+    public function calculatedProductionMinutes(): ?int
+    {
+        $cavities = (int) $this->calcCavities;
+        $cycle = (float) $this->calcCycleSeconds;
+        $quantity = (int) $this->calcQuantity;
+
+        if ($cavities <= 0 || $cycle <= 0 || $quantity <= 0) {
+            return null;
+        }
+
+        return (int) ceil(ceil($quantity / $cavities) * $cycle / 60);
     }
 
     public function selectTab(string $tab): void
@@ -913,37 +958,40 @@ new class extends Component
                     @error('password')<p class="text-sm text-red-600">{{ $message }}</p>@enderror
                 </div>
                 <button type="submit" wire:loading.attr="disabled" class="mt-6 w-full rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t('login') }}</button>
-                <div class="mt-4 text-center">
-                    <select wire:change="selectLanguage($event.target.value)" class="rounded-md border-slate-300 py-1 text-xs">
-                        <option value="hu" @selected($locale === 'hu')>{{ $this->t('hungarian') }}</option>
-                        <option value="de" @selected($locale === 'de')>{{ $this->t('german') }}</option>
-                    </select>
+                <div class="mt-4 flex justify-center">
+                    @include('partials.language-switcher')
                 </div>
             </form>
         </div>
     @else
-    <header class="sticky top-0 z-40 border-b-4 border-teal-600 bg-white shadow-sm">
+    <header x-data="{ menuOpen: false }" class="sticky top-0 z-40 border-b-4 border-teal-600 bg-white shadow-sm">
         <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2 sm:px-6">
             <div class="flex items-center gap-3">
+                <button type="button" x-on:click="menuOpen = !menuOpen" x-bind:aria-expanded="menuOpen" aria-label="Menu" class="relative rounded-md border border-slate-300 p-2 text-slate-700 hover:bg-slate-100 md:hidden">
+                    <svg x-show="! menuOpen" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                    <svg x-show="menuOpen" x-cloak class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+                    @if ($this->unreadNotificationCount > 0)
+                        <span class="absolute -right-1.5 -top-1.5 h-3 w-3 rounded-full bg-red-600 ring-2 ring-white"></span>
+                    @endif
+                </button>
                 <img src="{{ asset('logo.png') }}" alt="Periplast" class="h-10 w-auto sm:h-12">
-                <span class="hidden text-sm font-semibold text-slate-500 sm:inline">{{ $this->t('live_overview') }}</span>
+                <span class="hidden text-sm font-semibold text-slate-500 lg:inline">{{ $this->t('live_overview') }}</span>
             </div>
-            <div class="flex items-center gap-2">
-                <label class="sr-only" for="locale">{{ $this->t('language') }}</label>
-                <select id="locale" wire:change="selectLanguage($event.target.value)" class="rounded-md border-slate-300 py-1 text-xs font-semibold text-slate-700 focus:border-teal-600 focus:ring-teal-600">
-                    <option value="hu" @selected($locale === 'hu')>{{ $this->t('hungarian') }}</option>
-                    <option value="de" @selected($locale === 'de')>{{ $this->t('german') }}</option>
-                </select>
+            <div class="flex items-center gap-3">
+                @include('partials.language-switcher')
                 <span class="hidden text-sm font-medium text-slate-600 md:inline">{{ auth()->user()->name }}</span>
                 <button wire:click="logout" class="rounded-md bg-slate-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800">{{ $this->t('logout') }}</button>
             </div>
         </div>
-        <nav class="border-t border-slate-100" aria-label="Main">
-            <div class="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-2 [scrollbar-width:none] sm:px-4">
-                @foreach (['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'moulds' => 'moulds', 'products' => 'products'] as $tab => $label)
+        <nav wire:poll.15s class="border-t border-slate-100" aria-label="Main">
+            <div x-bind:class="menuOpen ? 'flex' : 'hidden md:flex'" class="mx-auto max-w-7xl flex-col gap-1 px-2 py-2 md:flex-row md:overflow-x-auto md:py-0 sm:px-4">
+                @foreach (['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'notifications' => 'notifications', 'maintenance' => 'maintenance', 'calculators' => 'calculators', 'moulds' => 'moulds', 'products' => 'products'] as $tab => $label)
                     @if ($this->canViewTab($tab))
-                    <button wire:click="selectTab('{{ $tab }}')" @class(['shrink-0 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold transition', 'border-teal-600 text-teal-700' => $activeTab === $tab, 'border-transparent text-slate-600 hover:text-teal-700' => $activeTab !== $tab])>
+                    <button wire:click="selectTab('{{ $tab }}')" x-on:click="menuOpen = false" @class(['shrink-0 whitespace-nowrap rounded-md px-4 py-3 text-left text-sm font-semibold transition md:rounded-none md:border-b-2', 'bg-teal-50 text-teal-700 md:border-teal-600 md:bg-transparent' => $activeTab === $tab, 'text-slate-600 hover:text-teal-700 md:border-transparent' => $activeTab !== $tab])>
                         {{ $this->t($label) }}
+                        @if ($tab === 'notifications' && $this->unreadNotificationCount > 0)
+                            <span class="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-bold text-white">{{ $this->unreadNotificationCount }}</span>
+                        @endif
                     </button>
                     @endif
                 @endforeach
@@ -952,25 +1000,6 @@ new class extends Component
     </header>
 
     <main class="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6">
-        <section wire:poll.15s class="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <h2 class="font-bold text-slate-900">{{ $this->t('notifications') }} <span class="rounded-full bg-teal-100 px-2 py-0.5 text-xs text-teal-800">{{ $this->unreadNotificationCount }}</span></h2>
-                @if ($this->unreadNotificationCount > 0)
-                    <button wire:click="markNotificationsRead" class="text-sm font-semibold text-teal-700 hover:text-teal-900">{{ $this->t('mark_notifications_read') }}</button>
-                @endif
-            </div>
-            <ul class="mt-3 space-y-2">
-                @forelse ($this->notifications as $notification)
-                    <li @class(['rounded-md px-3 py-2 text-sm', 'bg-teal-50 text-teal-900' => ! $notification->read_at, 'bg-slate-50 text-slate-600' => $notification->read_at])>
-                        {{ $this->notificationText($notification->data) }}
-                        <span class="ml-2 text-xs text-slate-400">{{ $notification->created_at->diffForHumans() }}</span>
-                    </li>
-                @empty
-                    <li class="text-sm text-slate-500">{{ $this->t('no_notifications') }}</li>
-                @endforelse
-            </ul>
-        </section>
-
         @if ($flashMessage)
             <div class="mb-5 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">
                 {{ $flashMessage }}
@@ -1031,7 +1060,7 @@ new class extends Component
                                             </span>
                                             @php($lastQualityCheck = $this->lastQualityCheckAt($order))
                                             <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', 'bg-red-100 text-red-800' => $this->qualityCheckOverdue($order), 'bg-slate-100 text-slate-700' => ! $this->qualityCheckOverdue($order)])>
-                                                {{ $lastQualityCheck ? $this->t('last_quality_check_at', ['time' => $lastQualityCheck->format('Y-m-d H:i:s P')]) : $this->t('no_quality_check_yet') }}
+                                                {{ $lastQualityCheck ? $this->t('last_quality_check_at', ['time' => $lastQualityCheck->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i:s')]) : $this->t('no_quality_check_yet') }}
                                             </span>
                                             @if ($this->qualityCheckOverdue($order))
                                                 <span class="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">{{ $this->t('quality_check_overdue') }}</span>
@@ -1052,6 +1081,35 @@ new class extends Component
                     @endforelse
                 </div>
 
+            </section>
+        @elseif ($activeTab === 'notifications')
+            <section wire:poll.15s class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('notifications') }}</h1>
+                    @if ($this->unreadNotificationCount > 0)
+                        <button wire:click="markNotificationsRead" class="text-sm font-semibold text-teal-700 hover:text-teal-900">{{ $this->t('mark_notifications_read') }}</button>
+                    @endif
+                </div>
+                <ul class="mt-4 space-y-2">
+                    @forelse ($this->notifications as $notification)
+                        <li @class(['rounded-md px-3 py-2 text-sm', 'bg-teal-50 text-teal-900' => ! $notification->read_at, 'bg-slate-50 text-slate-600' => $notification->read_at])>
+                            {{ $this->notificationText($notification->data) }}
+                            <span class="ml-2 text-xs text-slate-400">{{ $notification->created_at->diffForHumans() }}</span>
+                        </li>
+                    @empty
+                        <li class="text-sm text-slate-500">{{ $this->t('no_notifications') }}</li>
+                    @endforelse
+                </ul>
+            </section>
+        @elseif ($activeTab === 'maintenance')
+            <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('maintenance') }}</h1>
+                <p class="mt-4 text-sm text-slate-500">{{ $this->t('no_maintenance_yet') }}</p>
+            </section>
+        @elseif ($activeTab === 'calculators')
+            <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h1 class="mb-5 text-2xl font-bold text-slate-900">{{ $this->t('calculators') }}</h1>
+                <button wire:click="openCalculator" class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm font-bold text-slate-800 hover:border-teal-400 hover:bg-teal-50">{{ $this->t('production_time_calculator') }}</button>
             </section>
         @elseif ($activeTab === 'tasks')
             <section>
@@ -1164,6 +1222,7 @@ new class extends Component
         @endif
     </main>
 
+    @include('partials.footer')
     @if ($detailMachineId && ($detail = $this->detailMachine))
         @php($detailOrder = $detail->orders->first())
         @php($detailMould = $detailOrder?->mould)
@@ -1244,7 +1303,7 @@ new class extends Component
                                 <div><dt class="text-slate-500">{{ $this->t('actual_cycle') }}</dt><dd class="font-semibold">{{ $detailOrder->cycle_time ? number_format($detailOrder->cycle_time / 1000, 1, ',', ' ').' s' : '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('net_weight') }}</dt><dd class="font-semibold">{{ $detailOrder->net_weight !== null ? $detailOrder->net_weight.' g' : '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('gross_weight') }}</dt><dd class="font-semibold">{{ $detailOrder->gross_weight !== null ? $detailOrder->gross_weight.' g' : '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('started_at') }}</dt><dd class="font-semibold">{{ $this->productionStartedAt($detailOrder)?->format('Y-m-d H:i') ?? '-' }}</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('started_at') }}</dt><dd class="font-semibold">{{ $this->productionStartedAt($detailOrder)?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-' }}</dd></div>
                             </dl>
                             <div class="mt-4 flex justify-between text-sm"><span>{{ $this->t('current_quantity') }}</span><strong>{{ $detailOrder->current_quantity }} / {{ $detailOrder->quantity }} db</strong></div>
                             @include('partials.production-progress-bar', ['order' => $detailOrder])
@@ -1284,6 +1343,52 @@ new class extends Component
         </div>
     @endif
 
+    @if ($showCalculatorModal)
+        @php($calcProduct = $calcProductId ? $this->products->firstWhere('id', $calcProductId) : null)
+        @php($calcMinutes = $this->calculatedProductionMinutes())
+        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
+            <div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
+                <h2 class="text-xl font-bold">{{ $this->t('production_time_calculator') }}</h2>
+                <div class="mt-5 grid gap-4">
+                    <label class="text-sm font-semibold">{{ $this->t('product') }}
+                        <select wire:model.live="calcProductId" class="mt-1 w-full rounded-md border-slate-300">
+                            <option value="">{{ $this->t('select_product') }}</option>
+                            @foreach ($this->products as $product)
+                                <option value="{{ $product->id }}">{{ $product->name }} ({{ $product->code }})</option>
+                            @endforeach
+                        </select>
+                    </label>
+                    @if ($calcProduct)
+                        @if ($calcProduct->moulds->count() > 1)
+                            <label class="text-sm font-semibold">{{ $this->t('select_mould') }}
+                                <select wire:model.live="calcMouldId" class="mt-1 w-full rounded-md border-slate-300">
+                                    @foreach ($calcProduct->moulds as $mould)
+                                        <option value="{{ $mould->id }}">{{ $mould->name }} ({{ $mould->number }})</option>
+                                    @endforeach
+                                </select>
+                            </label>
+                        @endif
+                        <div class="grid grid-cols-2 gap-3">
+                            <label class="text-sm font-semibold">{{ $this->t('cavity_count') }}<input wire:model.live.debounce.400ms="calcCavities" type="number" min="1" class="mt-1 w-full rounded-md border-slate-300"></label>
+                            <label class="text-sm font-semibold">{{ $this->t('cycle_time_seconds') }}<input wire:model.live.debounce.400ms="calcCycleSeconds" type="number" min="0" step="0.01" class="mt-1 w-full rounded-md border-slate-300"></label>
+                        </div>
+                        <p class="-mt-2 text-xs text-slate-500">{{ $this->t('calc_not_saved_hint') }}</p>
+                        <label class="text-sm font-semibold">{{ $this->t('production_quantity') }}<input wire:model.live.debounce.400ms="calcQuantity" type="number" min="1" class="mt-1 w-full rounded-md border-slate-300"></label>
+                        <div class="rounded-lg bg-teal-50 p-4 text-sm text-teal-900">
+                            @if ($calcMinutes !== null)
+                                <div class="font-semibold">{{ $this->t('calc_result') }}</div>
+                                <div class="mt-1 text-xl font-bold">{{ intdiv($calcMinutes, 1440) }} {{ $this->t('calc_days') }}, {{ intdiv($calcMinutes % 1440, 60) }} {{ $this->t('calc_hours') }}, {{ $calcMinutes % 60 }} {{ $this->t('calc_minutes') }}</div>
+                            @else
+                                {{ $this->t('calc_missing_data') }}
+                            @endif
+                        </div>
+                    @endif
+                </div>
+                <div class="mt-6 flex justify-end"><button wire:click="$set('showCalculatorModal', false)" class="rounded-md bg-slate-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('close') }}</button></div>
+            </div>
+        </div>
+    @endif
+
     @if ($showOrderModal)
         <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold">{{ $this->t('manage_order') }}</h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold">{{ $this->t('status') }}<select wire:model.live="orderStatus" class="mt-1 w-full rounded-md border-slate-300">@if (! $this->isAdmin())<option value="">{{ $this->t('select_status') }}</option>@endif @if ($this->isAdmin())<option value="in_progress">{{ $this->t('in_progress') }}</option><option value="paused">{{ $this->t('paused') }}</option><option value="completed">{{ $this->t('completed') }}</option><option value="interrupted">{{ $this->t('interrupted') }}</option>@else<option value="paused">{{ $this->t('paused') }}</option><option value="interrupted">{{ $this->t('interrupted') }}</option>@endif</select></label><label class="text-sm font-semibold">{{ $this->t('current_quantity') }}<input wire:model="currentQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@if(in_array($orderStatus, ['completed', 'interrupted'], true))<label class="text-sm font-semibold">{{ $this->t('good_quantity') }}<input wire:model="goodQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><label class="text-sm font-semibold">{{ $this->t('bad_quantity') }}<input wire:model="badQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@endif</div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showOrderModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="saveOrder" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('save') }}</button></div></div></div>
     @endif
@@ -1313,7 +1418,7 @@ new class extends Component
                                             <span class="flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold {{ $appearance['badge'] }}" aria-hidden="true">{{ $appearance['icon'] }}</span>
                                             <span class="rounded-full px-2.5 py-1 text-xs font-bold {{ $appearance['badge'] }}">{{ $this->t('protocol_type_'.data_get($entry, 'entry_type', 'note')) }}</span>
                                         </span>
-                                        <time class="text-sm text-slate-600">{{ \Illuminate\Support\Carbon::parse(data_get($entry, 'timestamp'))->format('Y-m-d H:i:s P') }}</time>
+                                        <time class="text-sm text-slate-600">{{ \Illuminate\Support\Carbon::parse(data_get($entry, 'timestamp'))->timezone(config('app.display_timezone'))->format('Y-m-d H:i:s') }}</time>
                                     </div>
                                     <p class="mt-2 whitespace-pre-wrap text-sm">{{ data_get($entry, 'note', '') }}</p>
                                     <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">

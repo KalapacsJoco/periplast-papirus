@@ -25,6 +25,25 @@ class ExampleTest extends TestCase
         $response->assertStatus(200);
     }
 
+    public function test_production_time_calculator_loads_product_data_and_computes_duration(): void
+    {
+        $user = User::factory()->create(['role' => Role::Operator]);
+        $mould = \App\Models\Mould::factory()->create(['cavity_count' => 4]);
+        $product = \App\Models\Product::factory()->create(['planned_cycle_time' => 30000]);
+        $product->moulds()->attach($mould);
+
+        Livewire::actingAs($user)->test('production-dashboard')
+            ->call('selectTab', 'calculators')
+            ->call('openCalculator')
+            ->set('calcProductId', $product->id)
+            ->assertSet('calcCavities', 4)
+            ->assertSet('calcCycleSeconds', 30.0)
+            ->set('calcQuantity', 10000)
+            ->assertSee('0 nap, 20 óra, 50 perc')
+            ->set('calcCavities', 2)
+            ->assertSee('1 nap, 17 óra, 40 perc');
+    }
+
     public function test_quality_issue_pauses_production_and_persists_the_quality_status(): void
     {
         $qualityManager = User::factory()->create(['role' => Role::QualityManager]);
@@ -97,7 +116,7 @@ class ExampleTest extends TestCase
                 ->set('currentQuantity', 12)
                 ->call('saveQualityCheck')
                 ->call('openProductionProtocol', $order->id)
-                ->assertSee('Utolsó minőségellenőrzés: '.$checkedAt->format('Y-m-d H:i:s P'))
+                ->assertSee('Utolsó minőségellenőrzés: '.$checkedAt->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i:s'))
                 ->assertDontSee('Minőségellenőrzés szükséges')
                 ->assertSee('border-emerald-500')
                 ->assertSee('✓');

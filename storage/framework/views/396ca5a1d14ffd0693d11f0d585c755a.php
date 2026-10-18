@@ -51,38 +51,41 @@ endif;
 unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                 </div>
                 <button type="submit" wire:loading.attr="disabled" class="mt-6 w-full rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800"><?php echo e($this->t('login')); ?></button>
-                <div class="mt-4 text-center">
-                    <select wire:change="selectLanguage($event.target.value)" class="rounded-md border-slate-300 py-1 text-xs">
-                        <option value="hu" <?php if($locale === 'hu'): echo 'selected'; endif; ?>><?php echo e($this->t('hungarian')); ?></option>
-                        <option value="de" <?php if($locale === 'de'): echo 'selected'; endif; ?>><?php echo e($this->t('german')); ?></option>
-                    </select>
+                <div class="mt-4 flex justify-center">
+                    <?php echo $__env->make('partials.language-switcher', array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
                 </div>
             </form>
         </div>
     <?php else: ?>
-    <header class="sticky top-0 z-40 border-b-4 border-teal-600 bg-white shadow-sm">
+    <header x-data="{ menuOpen: false }" class="sticky top-0 z-40 border-b-4 border-teal-600 bg-white shadow-sm">
         <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2 sm:px-6">
             <div class="flex items-center gap-3">
+                <button type="button" x-on:click="menuOpen = !menuOpen" x-bind:aria-expanded="menuOpen" aria-label="Menu" class="relative rounded-md border border-slate-300 p-2 text-slate-700 hover:bg-slate-100 md:hidden">
+                    <svg x-show="! menuOpen" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                    <svg x-show="menuOpen" x-cloak class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->unreadNotificationCount > 0): ?>
+                        <span class="absolute -right-1.5 -top-1.5 h-3 w-3 rounded-full bg-red-600 ring-2 ring-white"></span>
+                    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                </button>
                 <img src="<?php echo e(asset('logo.png')); ?>" alt="Periplast" class="h-10 w-auto sm:h-12">
-                <span class="hidden text-sm font-semibold text-slate-500 sm:inline"><?php echo e($this->t('live_overview')); ?></span>
+                <span class="hidden text-sm font-semibold text-slate-500 lg:inline"><?php echo e($this->t('live_overview')); ?></span>
             </div>
-            <div class="flex items-center gap-2">
-                <label class="sr-only" for="locale"><?php echo e($this->t('language')); ?></label>
-                <select id="locale" wire:change="selectLanguage($event.target.value)" class="rounded-md border-slate-300 py-1 text-xs font-semibold text-slate-700 focus:border-teal-600 focus:ring-teal-600">
-                    <option value="hu" <?php if($locale === 'hu'): echo 'selected'; endif; ?>><?php echo e($this->t('hungarian')); ?></option>
-                    <option value="de" <?php if($locale === 'de'): echo 'selected'; endif; ?>><?php echo e($this->t('german')); ?></option>
-                </select>
+            <div class="flex items-center gap-3">
+                <?php echo $__env->make('partials.language-switcher', array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
                 <span class="hidden text-sm font-medium text-slate-600 md:inline"><?php echo e(auth()->user()->name); ?></span>
                 <button wire:click="logout" class="rounded-md bg-slate-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800"><?php echo e($this->t('logout')); ?></button>
             </div>
         </div>
-        <nav class="border-t border-slate-100" aria-label="Main">
-            <div class="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-2 [scrollbar-width:none] sm:px-4">
-                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = ['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'moulds' => 'moulds', 'products' => 'products']; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $tab => $label): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+        <nav wire:poll.15s class="border-t border-slate-100" aria-label="Main">
+            <div x-bind:class="menuOpen ? 'flex' : 'hidden md:flex'" class="mx-auto max-w-7xl flex-col gap-1 px-2 py-2 md:flex-row md:overflow-x-auto md:py-0 sm:px-4">
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = ['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'notifications' => 'notifications', 'maintenance' => 'maintenance', 'calculators' => 'calculators', 'moulds' => 'moulds', 'products' => 'products']; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $tab => $label): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
                     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canViewTab($tab)): ?>
-                    <button wire:click="selectTab('<?php echo e($tab); ?>')" class="<?php echo \Illuminate\Support\Arr::toCssClasses(['shrink-0 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold transition', 'border-teal-600 text-teal-700' => $activeTab === $tab, 'border-transparent text-slate-600 hover:text-teal-700' => $activeTab !== $tab]); ?>">
+                    <button wire:click="selectTab('<?php echo e($tab); ?>')" x-on:click="menuOpen = false" class="<?php echo \Illuminate\Support\Arr::toCssClasses(['shrink-0 whitespace-nowrap rounded-md px-4 py-3 text-left text-sm font-semibold transition md:rounded-none md:border-b-2', 'bg-teal-50 text-teal-700 md:border-teal-600 md:bg-transparent' => $activeTab === $tab, 'text-slate-600 hover:text-teal-700 md:border-transparent' => $activeTab !== $tab]); ?>">
                         <?php echo e($this->t($label)); ?>
 
+                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($tab === 'notifications' && $this->unreadNotificationCount > 0): ?>
+                            <span class="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-bold text-white"><?php echo e($this->unreadNotificationCount); ?></span>
+                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                     </button>
                     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                 <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
@@ -91,26 +94,6 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
     </header>
 
     <main class="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6">
-        <section wire:poll.15s class="mb-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <h2 class="font-bold text-slate-900"><?php echo e($this->t('notifications')); ?> <span class="rounded-full bg-teal-100 px-2 py-0.5 text-xs text-teal-800"><?php echo e($this->unreadNotificationCount); ?></span></h2>
-                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->unreadNotificationCount > 0): ?>
-                    <button wire:click="markNotificationsRead" class="text-sm font-semibold text-teal-700 hover:text-teal-900"><?php echo e($this->t('mark_notifications_read')); ?></button>
-                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
-            </div>
-            <ul class="mt-3 space-y-2">
-                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->notifications; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $notification): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
-                    <li class="<?php echo \Illuminate\Support\Arr::toCssClasses(['rounded-md px-3 py-2 text-sm', 'bg-teal-50 text-teal-900' => ! $notification->read_at, 'bg-slate-50 text-slate-600' => $notification->read_at]); ?>">
-                        <?php echo e($this->notificationText($notification->data)); ?>
-
-                        <span class="ml-2 text-xs text-slate-400"><?php echo e($notification->created_at->diffForHumans()); ?></span>
-                    </li>
-                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
-                    <li class="text-sm text-slate-500"><?php echo e($this->t('no_notifications')); ?></li>
-                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
-            </ul>
-        </section>
-
         <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($flashMessage): ?>
             <div class="mb-5 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">
                 <?php echo e($flashMessage); ?>
@@ -173,7 +156,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                                             </span>
                                             <?php ($lastQualityCheck = $this->lastQualityCheckAt($order)); ?>
                                             <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['rounded-full px-2.5 py-1 text-xs font-bold', 'bg-red-100 text-red-800' => $this->qualityCheckOverdue($order), 'bg-slate-100 text-slate-700' => ! $this->qualityCheckOverdue($order)]); ?>">
-                                                <?php echo e($lastQualityCheck ? $this->t('last_quality_check_at', ['time' => $lastQualityCheck->format('Y-m-d H:i:s P')]) : $this->t('no_quality_check_yet')); ?>
+                                                <?php echo e($lastQualityCheck ? $this->t('last_quality_check_at', ['time' => $lastQualityCheck->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i:s')]) : $this->t('no_quality_check_yet')); ?>
 
                                             </span>
                                             <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->qualityCheckOverdue($order)): ?>
@@ -195,6 +178,36 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                 </div>
 
+            </section>
+        <?php elseif($activeTab === 'notifications'): ?>
+            <section wire:poll.15s class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <h1 class="text-2xl font-bold text-slate-900"><?php echo e($this->t('notifications')); ?></h1>
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->unreadNotificationCount > 0): ?>
+                        <button wire:click="markNotificationsRead" class="text-sm font-semibold text-teal-700 hover:text-teal-900"><?php echo e($this->t('mark_notifications_read')); ?></button>
+                    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                </div>
+                <ul class="mt-4 space-y-2">
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->notifications; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $notification): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                        <li class="<?php echo \Illuminate\Support\Arr::toCssClasses(['rounded-md px-3 py-2 text-sm', 'bg-teal-50 text-teal-900' => ! $notification->read_at, 'bg-slate-50 text-slate-600' => $notification->read_at]); ?>">
+                            <?php echo e($this->notificationText($notification->data)); ?>
+
+                            <span class="ml-2 text-xs text-slate-400"><?php echo e($notification->created_at->diffForHumans()); ?></span>
+                        </li>
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                        <li class="text-sm text-slate-500"><?php echo e($this->t('no_notifications')); ?></li>
+                    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                </ul>
+            </section>
+        <?php elseif($activeTab === 'maintenance'): ?>
+            <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h1 class="text-2xl font-bold text-slate-900"><?php echo e($this->t('maintenance')); ?></h1>
+                <p class="mt-4 text-sm text-slate-500"><?php echo e($this->t('no_maintenance_yet')); ?></p>
+            </section>
+        <?php elseif($activeTab === 'calculators'): ?>
+            <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h1 class="mb-5 text-2xl font-bold text-slate-900"><?php echo e($this->t('calculators')); ?></h1>
+                <button wire:click="openCalculator" class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm font-bold text-slate-800 hover:border-teal-400 hover:bg-teal-50"><?php echo e($this->t('production_time_calculator')); ?></button>
             </section>
         <?php elseif($activeTab === 'tasks'): ?>
             <section>
@@ -308,6 +321,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
         <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
     </main>
 
+    <?php echo $__env->make('partials.footer', array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMachineId && ($detail = $this->detailMachine)): ?>
         <?php ($detailOrder = $detail->orders->first()); ?>
         <?php ($detailMould = $detailOrder?->mould); ?>
@@ -388,7 +402,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                                 <div><dt class="text-slate-500"><?php echo e($this->t('actual_cycle')); ?></dt><dd class="font-semibold"><?php echo e($detailOrder->cycle_time ? number_format($detailOrder->cycle_time / 1000, 1, ',', ' ').' s' : '-'); ?></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('net_weight')); ?></dt><dd class="font-semibold"><?php echo e($detailOrder->net_weight !== null ? $detailOrder->net_weight.' g' : '-'); ?></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('gross_weight')); ?></dt><dd class="font-semibold"><?php echo e($detailOrder->gross_weight !== null ? $detailOrder->gross_weight.' g' : '-'); ?></dd></div>
-                                <div><dt class="text-slate-500"><?php echo e($this->t('started_at')); ?></dt><dd class="font-semibold"><?php echo e($this->productionStartedAt($detailOrder)?->format('Y-m-d H:i') ?? '-'); ?></dd></div>
+                                <div><dt class="text-slate-500"><?php echo e($this->t('started_at')); ?></dt><dd class="font-semibold"><?php echo e($this->productionStartedAt($detailOrder)?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-'); ?></dd></div>
                             </dl>
                             <div class="mt-4 flex justify-between text-sm"><span><?php echo e($this->t('current_quantity')); ?></span><strong><?php echo e($detailOrder->current_quantity); ?> / <?php echo e($detailOrder->quantity); ?> db</strong></div>
                             <?php echo $__env->make('partials.production-progress-bar', ['order' => $detailOrder], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
@@ -435,6 +449,55 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
         </div>
     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
 
+    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($showCalculatorModal): ?>
+        <?php ($calcProduct = $calcProductId ? $this->products->firstWhere('id', $calcProductId) : null); ?>
+        <?php ($calcMinutes = $this->calculatedProductionMinutes()); ?>
+        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
+            <div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
+                <h2 class="text-xl font-bold"><?php echo e($this->t('production_time_calculator')); ?></h2>
+                <div class="mt-5 grid gap-4">
+                    <label class="text-sm font-semibold"><?php echo e($this->t('product')); ?>
+
+                        <select wire:model.live="calcProductId" class="mt-1 w-full rounded-md border-slate-300">
+                            <option value=""><?php echo e($this->t('select_product')); ?></option>
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = $this->products; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $product): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                                <option value="<?php echo e($product->id); ?>"><?php echo e($product->name); ?> (<?php echo e($product->code); ?>)</option>
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                        </select>
+                    </label>
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($calcProduct): ?>
+                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($calcProduct->moulds->count() > 1): ?>
+                            <label class="text-sm font-semibold"><?php echo e($this->t('select_mould')); ?>
+
+                                <select wire:model.live="calcMouldId" class="mt-1 w-full rounded-md border-slate-300">
+                                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = $calcProduct->moulds; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $mould): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                                        <option value="<?php echo e($mould->id); ?>"><?php echo e($mould->name); ?> (<?php echo e($mould->number); ?>)</option>
+                                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                                </select>
+                            </label>
+                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                        <div class="grid grid-cols-2 gap-3">
+                            <label class="text-sm font-semibold"><?php echo e($this->t('cavity_count')); ?><input wire:model.live.debounce.400ms="calcCavities" type="number" min="1" class="mt-1 w-full rounded-md border-slate-300"></label>
+                            <label class="text-sm font-semibold"><?php echo e($this->t('cycle_time_seconds')); ?><input wire:model.live.debounce.400ms="calcCycleSeconds" type="number" min="0" step="0.01" class="mt-1 w-full rounded-md border-slate-300"></label>
+                        </div>
+                        <p class="-mt-2 text-xs text-slate-500"><?php echo e($this->t('calc_not_saved_hint')); ?></p>
+                        <label class="text-sm font-semibold"><?php echo e($this->t('production_quantity')); ?><input wire:model.live.debounce.400ms="calcQuantity" type="number" min="1" class="mt-1 w-full rounded-md border-slate-300"></label>
+                        <div class="rounded-lg bg-teal-50 p-4 text-sm text-teal-900">
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($calcMinutes !== null): ?>
+                                <div class="font-semibold"><?php echo e($this->t('calc_result')); ?></div>
+                                <div class="mt-1 text-xl font-bold"><?php echo e(intdiv($calcMinutes, 1440)); ?> <?php echo e($this->t('calc_days')); ?>, <?php echo e(intdiv($calcMinutes % 1440, 60)); ?> <?php echo e($this->t('calc_hours')); ?>, <?php echo e($calcMinutes % 60); ?> <?php echo e($this->t('calc_minutes')); ?></div>
+                            <?php else: ?>
+                                <?php echo e($this->t('calc_missing_data')); ?>
+
+                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                        </div>
+                    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                </div>
+                <div class="mt-6 flex justify-end"><button wire:click="$set('showCalculatorModal', false)" class="rounded-md bg-slate-700 px-4 py-2 text-sm font-bold text-white"><?php echo e($this->t('close')); ?></button></div>
+            </div>
+        </div>
+    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+
     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($showOrderModal): ?>
         <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold"><?php echo e($this->t('manage_order')); ?></h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold"><?php echo e($this->t('status')); ?><select wire:model.live="orderStatus" class="mt-1 w-full rounded-md border-slate-300"><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if(! $this->isAdmin()): ?><option value=""><?php echo e($this->t('select_status')); ?></option><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?> <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->isAdmin()): ?><option value="in_progress"><?php echo e($this->t('in_progress')); ?></option><option value="paused"><?php echo e($this->t('paused')); ?></option><option value="completed"><?php echo e($this->t('completed')); ?></option><option value="interrupted"><?php echo e($this->t('interrupted')); ?></option><?php else: ?><option value="paused"><?php echo e($this->t('paused')); ?></option><option value="interrupted"><?php echo e($this->t('interrupted')); ?></option><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></select></label><label class="text-sm font-semibold"><?php echo e($this->t('current_quantity')); ?><input wire:model="currentQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if(in_array($orderStatus, ['completed', 'interrupted'], true)): ?><label class="text-sm font-semibold"><?php echo e($this->t('good_quantity')); ?><input wire:model="goodQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><label class="text-sm font-semibold"><?php echo e($this->t('bad_quantity')); ?><input wire:model="badQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showOrderModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600"><?php echo e($this->t('cancel')); ?></button><button wire:click="saveOrder" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white"><?php echo e($this->t('save')); ?></button></div></div></div>
     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
@@ -464,7 +527,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                                             <span class="flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold <?php echo e($appearance['badge']); ?>" aria-hidden="true"><?php echo e($appearance['icon']); ?></span>
                                             <span class="rounded-full px-2.5 py-1 text-xs font-bold <?php echo e($appearance['badge']); ?>"><?php echo e($this->t('protocol_type_'.data_get($entry, 'entry_type', 'note'))); ?></span>
                                         </span>
-                                        <time class="text-sm text-slate-600"><?php echo e(\Illuminate\Support\Carbon::parse(data_get($entry, 'timestamp'))->format('Y-m-d H:i:s P')); ?></time>
+                                        <time class="text-sm text-slate-600"><?php echo e(\Illuminate\Support\Carbon::parse(data_get($entry, 'timestamp'))->timezone(config('app.display_timezone'))->format('Y-m-d H:i:s')); ?></time>
                                     </div>
                                     <p class="mt-2 whitespace-pre-wrap text-sm"><?php echo e(data_get($entry, 'note', '')); ?></p>
                                     <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
