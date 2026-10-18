@@ -349,13 +349,42 @@ class RolePermissionsTest extends TestCase
                     ->test('production-dashboard')
                     ->call('openMachineModal', $machine->id)
                     ->set('status', $status)
-                    ->set('problemDescription', $status === 'warning' ? 'Scheduled maintenance' : '')
+                    ->set('problemDescription', $status === 'active' ? '' : 'Reason: '.$status)
                     ->call('saveMachineStatus')
                     ->assertHasNoErrors();
 
                 $this->assertSame($status, $machine->fresh()->status);
             }
         }
+    }
+
+    public function test_machine_card_shows_the_mould_warning_text(): void
+    {
+        $user = User::factory()->create(['role' => Role::Operator]);
+        $machine = Machine::factory()->create(['status' => 'active']);
+        $mould = \App\Models\Mould::factory()->create(['status' => 'warning', 'problem_description' => 'Kidobó csap kopott']);
+        Order::factory()->create(['machine_id' => $machine->id, 'mould_id' => $mould->id, 'status' => 'in_progress']);
+
+        Livewire::actingAs($user)->test('production-dashboard')->assertSee('Kidobó csap kopott');
+    }
+
+    public function test_machine_card_shows_good_for_active_and_the_entered_reason_for_stopped(): void
+    {
+        $user = User::factory()->create(['role' => Role::Operator]);
+        $machine = Machine::factory()->create(['status' => 'active']);
+
+        Livewire::actingAs($user)
+            ->test('production-dashboard')
+            ->call('openMachineModal', $machine->id)
+            ->set('status', 'stopped')
+            ->call('saveMachineStatus')
+            ->assertHasErrors(['problemDescription' => 'required'])
+            ->set('problemDescription', 'Hidraulika olajszint alacsony')
+            ->call('saveMachineStatus')
+            ->assertHasNoErrors()
+            ->assertSee('Hidraulika olajszint alacsony');
+
+        $this->assertSame('Hidraulika olajszint alacsony', $machine->fresh()->problem_description);
     }
 
     public function test_machine_card_displays_the_saved_machine_status(): void
@@ -437,7 +466,7 @@ class RolePermissionsTest extends TestCase
                 ->test('production-dashboard')
                 ->call('openMachineModal', $machine->id)
                 ->set('status', $status)
-                ->set('problemDescription', $status === 'warning' ? 'Maintenance needed' : '')
+                ->set('problemDescription', 'Reason: '.$status)
                 ->call('saveMachineStatus')
                 ->assertHasNoErrors();
 
@@ -469,11 +498,21 @@ class RolePermissionsTest extends TestCase
         Livewire::actingAs($operator)
             ->test('production-dashboard')
             ->call('openMouldModal', $mould->id)
-            ->set('status', 'active')
+            ->set('status', 'under_repair')
             ->call('saveMouldStatus')
             ->assertForbidden();
 
         $this->assertSame('active', $mould->fresh()->status);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openMouldModal', $mould->id)
+            ->set('status', 'needs_repair')
+            ->set('problemDescription', 'Broken core')
+            ->call('saveMouldStatus')
+            ->assertHasNoErrors();
+
+        $this->assertSame('needs_repair', $mould->fresh()->status);
     }
 
     public function test_programmer_cannot_complete_an_order(): void

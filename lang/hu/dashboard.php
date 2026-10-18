@@ -166,6 +166,8 @@ return [
     'planned_cycle' => 'Elméleti ciklusidő',
     'expected_quantity' => 'Elméleti mennyiség',
     'developed_by' => 'Fejlesztő',
+    'machine_status_label' => 'Gép státusza',
+    'mould_status_label' => 'Szerszám státusza',
     'active_machines' => 'Aktív gépek',
     'warning_machines' => 'Figyelmeztetéssel',
     'stopped_machines' => 'Leállított gépek',

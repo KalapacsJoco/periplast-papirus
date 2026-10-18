@@ -166,6 +166,8 @@ return [
     'planned_cycle' => 'Soll-Zykluszeit',
     'expected_quantity' => 'Soll-Menge',
     'developed_by' => 'Entwickler',
+    'machine_status_label' => 'Maschinenstatus',
+    'mould_status_label' => 'Werkzeugstatus',
     'active_machines' => 'Aktive Maschinen',
     'warning_machines' => 'Mit Warnung',
     'stopped_machines' => 'Gestoppte Maschinen',

@@ -210,7 +210,7 @@ new class extends Component
         return Machine::query()
             ->with(['orders' => fn ($query) => $query
                 ->whereIn('status', ['in_progress', 'paused'])
-                ->with(['mould:id,name,number,cavity_count,status', 'product:id,name,code,planned_cycle_time'])
+                ->with(['mould:id,name,number,cavity_count,status,problem_description', 'product:id,name,code,planned_cycle_time'])
                 ->orderByDesc('started_at')])
             ->orderBy('name')
             ->get();
@@ -422,7 +422,7 @@ new class extends Component
         $this->ensureAuthenticated();
         $validated = $this->validate([
             'status' => ['required', Rule::in(['active', 'stopped', 'warning', 'broken'])],
-            'problemDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf(in_array($this->status, ['warning', 'broken'], true))],
+            'problemDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf(in_array($this->status, ['warning', 'broken', 'stopped'], true))],
         ]);
 
         if ($validated['status'] === 'active') {
@@ -438,7 +438,7 @@ new class extends Component
         $machine = Machine::findOrFail($this->machineId);
         $machine->update([
             'status' => $validated['status'],
-            'problem_description' => in_array($validated['status'], ['warning', 'broken'], true)
+            'problem_description' => in_array($validated['status'], ['warning', 'broken', 'stopped'], true)
                 ? $validated['problemDescription']
                 : null,
         ]);
@@ -483,7 +483,7 @@ new class extends Component
             'problemDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf(in_array($this->status, ['warning', 'needs_repair'], true))],
         ]);
 
-        if ($validated['status'] === 'warning') {
+        if (in_array($validated['status'], ['active', 'warning', 'needs_repair'], true)) {
             $this->ensurePermission(Role::REPORT_EQUIPMENT_WARNING);
         } else {
             abort_unless($this->isAdmin(), 403);
@@ -1084,12 +1084,9 @@ new class extends Component
                             </div>
                             <div class="p-5">
                                 <dl class="grid grid-cols-2 gap-3 text-sm">
-                                    <div><dt class="text-slate-500">{{ $this->t('opening') }}</dt><dd class="font-semibold">{{ $machine->open_mm ?? '-' }} mm</dd></div>
-                                    <div><dt class="text-slate-500">{{ $this->t('screw_diameter') }}</dt><dd class="font-semibold">{{ $machine->screw_diameter_cm ?? '-' }} cm</dd></div>
+                                    <div><dt class="text-slate-500">{{ $this->t('machine_status_label') }}</dt><dd class="mt-0.5"><span wire:key="machine-card-status-{{ $machine->id }}-{{ $machine->status }}" @class(['inline-block rounded-full px-2.5 py-0.5 text-xs font-bold', $this->statusClass($machine->status)])>{{ $machine->status === 'active' ? $this->t('good') : $this->statusLabel($machine->status) }}</span>@if ($machine->problem_description && $machine->status !== 'active')<p class="mt-1 break-words text-xs text-slate-700">{{ $machine->problem_description }}</p>@endif</dd></div>
+                                    <div><dt class="text-slate-500">{{ $this->t('mould_status_label') }}</dt><dd class="mt-0.5">@if ($order?->mould)<span wire:key="mould-card-status-{{ $order->mould->id }}-{{ $order->mould->status }}" @class(['inline-block rounded-full px-2.5 py-0.5 text-xs font-bold', $this->statusClass($order->mould->status)])>{{ $order->mould->status === 'active' ? $this->t('good') : $this->statusLabel($order->mould->status) }}</span>@if ($order->mould->problem_description && $order->mould->status !== 'active')<p class="mt-1 break-words text-xs text-slate-700">{{ $order->mould->problem_description }}</p>@endif @else<span class="font-semibold">-</span>@endif</dd></div>
                                 </dl>
-                                @if ($machine->problem_description)
-                                    <p class="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{ $machine->problem_description }}</p>
-                                @endif
                                 @if ($order)
                                     <div class="mt-5 rounded-lg border border-teal-100 bg-teal-50 p-4">
                                         <div class="flex items-start justify-between gap-3">
@@ -1384,8 +1381,8 @@ new class extends Component
             <div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
                 <h2 class="text-xl font-bold">{{ $showMachineModal ? $this->t('machines').' '.$this->t('change_status') : $this->t('moulds').' '.$this->t('change_status') }}</h2>
                 <div class="mt-5 space-y-4">
-                    <label class="block text-sm font-semibold">{{ $this->t('new_status') }}<select wire:model.live="status" class="mt-1 w-full rounded-md border-slate-300">@if ($showMachineModal)<option value="" disabled>{{ $this->t('select_status') }}</option>@if ($this->canDo(\App\Enums\Role::START_MACHINE))<option value="active">{{ $this->t('active') }}</option>@endif @if ($this->canDo(\App\Enums\Role::STOP_MACHINE))<option value="stopped">{{ $this->t('stopped') }}</option>@endif @if ($this->canDo(\App\Enums\Role::REPORT_EQUIPMENT_WARNING))<option value="warning">{{ $this->t('warning') }}</option>@endif @if ($this->isAdmin())<option value="broken">{{ $this->t('broken') }}</option>@endif @else @if ($this->isAdmin())<option value="active">{{ $this->t('active') }}</option><option value="standby">{{ $this->t('standby') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="needs_repair">{{ $this->t('needs_repair') }}</option><option value="under_repair">{{ $this->t('under_repair') }}</option>@else<option value="" disabled>{{ $this->t('select_status') }}</option><option value="warning">{{ $this->t('warning') }}</option>@endif @endif</select></label>
-                    @if (in_array($status, ['warning', 'broken', 'needs_repair'], true))<label class="block text-sm font-semibold">{{ $this->t('problem_description') }}<textarea wire:model="problemDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('problemDescription')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>@endif
+                    <label class="block text-sm font-semibold">{{ $this->t('new_status') }}<select wire:model.live="status" class="mt-1 w-full rounded-md border-slate-300">@if ($showMachineModal)<option value="" disabled>{{ $this->t('select_status') }}</option>@if ($this->canDo(\App\Enums\Role::START_MACHINE))<option value="active">{{ $this->t('active') }}</option>@endif @if ($this->canDo(\App\Enums\Role::STOP_MACHINE))<option value="stopped">{{ $this->t('stopped') }}</option>@endif @if ($this->canDo(\App\Enums\Role::REPORT_EQUIPMENT_WARNING))<option value="warning">{{ $this->t('warning') }}</option>@endif @if ($this->isAdmin())<option value="broken">{{ $this->t('broken') }}</option>@endif @else @if ($this->isAdmin())<option value="active">{{ $this->t('active') }}</option><option value="standby">{{ $this->t('standby') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="needs_repair">{{ $this->t('needs_repair') }}</option><option value="under_repair">{{ $this->t('under_repair') }}</option>@else<option value="" disabled>{{ $this->t('select_status') }}</option><option value="active">{{ $this->t('active') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="needs_repair">{{ $this->t('needs_repair') }}</option>@endif @endif</select></label>
+                    @if (in_array($status, ['warning', 'broken', 'needs_repair', 'stopped'], true))<label class="block text-sm font-semibold">{{ $this->t('problem_description') }}<textarea wire:model="problemDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('problemDescription')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>@endif
                 </div>
                 <div class="mt-6 flex justify-end gap-3"><button wire:click="$set('{{ $showMachineModal ? 'showMachineModal' : 'showMouldModal' }}', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="{{ $showMachineModal ? 'saveMachineStatus' : 'saveMouldStatus' }}" wire:loading.attr="disabled" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('save') }}</button></div>
             </div>
