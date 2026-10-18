@@ -1,7 +1,7 @@
 <?php
 
-use App\Enums\Role;
 use App\Auth\TabAuthentication;
+use App\Enums\Role;
 use App\Models\Machine;
 use App\Models\Mould;
 use App\Models\Order;
@@ -31,6 +31,8 @@ new class extends Component
 
     public ?int $qualityOrderId = null;
 
+    public ?int $protocolOrderId = null;
+
     public bool $showMachineModal = false;
 
     public bool $showMouldModal = false;
@@ -38,6 +40,8 @@ new class extends Component
     public bool $showOrderModal = false;
 
     public bool $showQualityModal = false;
+
+    public bool $showProtocolModal = false;
 
     public string $status = '';
 
@@ -56,6 +60,10 @@ new class extends Component
     public string $qualityProblemType = 'surface_defect';
 
     public string $qualityProblemNote = '';
+
+    public string $protocolEntryType = 'note';
+
+    public string $protocolEntryNote = '';
 
     public string $flashMessage = '';
 
@@ -351,6 +359,18 @@ new class extends Component
                 : null,
         ]);
 
+        Order::query()
+            ->where('machine_id', $machine->id)
+            ->whereIn('status', ['in_progress', 'paused'])
+            ->get()
+            ->each(fn (Order $order) => $this->appendProtocolEntry(
+                $order,
+                $order->current_quantity,
+                'machine_status',
+                $this->t('machine_status_note', ['status' => $this->statusLabel($validated['status'])])
+                    .(filled($validated['problemDescription'] ?? null) ? ': '.$validated['problemDescription'] : '')
+            ));
+
         if ($validated['status'] === 'broken') {
             $this->pauseOrdersFor('machine_id', $machine->id, $validated['problemDescription'] ?: $this->t('machine_paused_reason'));
         }
@@ -392,6 +412,18 @@ new class extends Component
                 ? $validated['problemDescription']
                 : null,
         ]);
+
+        Order::query()
+            ->where('mould_id', $mould->id)
+            ->whereIn('status', ['in_progress', 'paused'])
+            ->get()
+            ->each(fn (Order $order) => $this->appendProtocolEntry(
+                $order,
+                $order->current_quantity,
+                'mould_status',
+                $this->t('mould_status_note', ['status' => $this->statusLabel($validated['status'])])
+                    .(filled($validated['problemDescription'] ?? null) ? ': '.$validated['problemDescription'] : '')
+            ));
 
         if ($validated['status'] === 'needs_repair') {
             $this->pauseOrdersFor('mould_id', $mould->id, $validated['problemDescription'] ?: $this->t('mould_paused_reason'));
@@ -518,6 +550,8 @@ new class extends Component
             'quality_status' => $validated['qualityStatus'],
             'current_quantity' => $quantity,
             'check_type' => $isColorCheck ? 'color' : 'quality',
+            'signed_by' => Auth::user()->name,
+            'signed_by_user_id' => Auth::id(),
             'problem_type' => $validated['qualityStatus'] === 'good' ? null : $validated['qualityProblemType'],
             'problem_note' => $validated['qualityStatus'] === 'good' ? null : $validated['qualityProblemNote'],
         ];
@@ -537,7 +571,13 @@ new class extends Component
         }
 
         $order->update($orderUpdates);
-        $this->appendProtocolEntry($order->refresh(), $quantity, 'quality_check', $this->t('quality_check_note', ['status' => $this->statusLabel($validated['qualityStatus'])]));
+        $this->appendProtocolEntry(
+            $order->refresh(),
+            $quantity,
+            'quality_check',
+            $this->t('quality_check_note', ['status' => $this->statusLabel($validated['qualityStatus'])]),
+            ['quality_status' => $validated['qualityStatus']]
+        );
 
         $this->showQualityModal = false;
         $this->flashMessage = $followUpStatus === 'stopped'
@@ -552,9 +592,18 @@ new class extends Component
         $order = Order::query()
             ->whereIn('status', ['in_progress', 'paused'])
             ->findOrFail($orderId);
+        $previousOperatorId = $order->assigned_operator_id;
 
         if ($operatorId === '') {
             $order->update(['assigned_operator_id' => null]);
+            if ($previousOperatorId !== null) {
+                $this->appendProtocolEntry(
+                    $order->refresh(),
+                    $order->current_quantity,
+                    'assignment',
+                    $this->t('operator_unassigned_note')
+                );
+            }
         } else {
             $operator = User::query()
                 ->whereKey($operatorId)
@@ -565,6 +614,12 @@ new class extends Component
             $order->update(['assigned_operator_id' => $operator->id]);
             if ($assignmentChanged) {
                 $operator->notify(new OrderWorkflowNotification($order, 'assigned', Auth::user()->name));
+                $this->appendProtocolEntry(
+                    $order->refresh(),
+                    $order->current_quantity,
+                    'assignment',
+                    $this->t('operator_assignment_note', ['operator' => $operator->name])
+                );
             }
         }
 
@@ -587,9 +642,40 @@ new class extends Component
             'status' => 'setup',
             'problem_description' => null,
         ]);
+        $this->appendProtocolEntry($order->refresh(), $order->current_quantity, 'task_started', $this->t('task_started_note'));
 
         $this->flashMessage = $this->t('task_started');
         unset($this->machines, $this->ordersForMyTasks);
+    }
+
+    public function openProductionProtocol(int $orderId): void
+    {
+        $this->ensureAuthenticated();
+        $this->protocolOrderId = Order::query()->findOrFail($orderId)->id;
+        $this->protocolEntryType = 'note';
+        $this->protocolEntryNote = '';
+        $this->resetValidation();
+        $this->showProtocolModal = true;
+    }
+
+    public function addProductionProtocolEntry(): void
+    {
+        $this->ensureAuthenticated();
+        $validated = $this->validate([
+            'protocolEntryType' => ['required', Rule::in(['note', 'parameter_change', 'machine_issue', 'mould_issue', 'other'])],
+            'protocolEntryNote' => ['required', 'string', 'max:2000'],
+        ]);
+
+        $order = Order::query()->findOrFail($this->protocolOrderId);
+        $this->appendProtocolEntry(
+            $order,
+            $order->current_quantity,
+            $validated['protocolEntryType'],
+            $validated['protocolEntryNote']
+        );
+
+        $this->protocolEntryNote = '';
+        $this->flashMessage = $this->t('protocol_entry_saved');
     }
 
     public function markNotificationsRead(): void
@@ -678,6 +764,41 @@ new class extends Component
         return in_array($lastStatus, ['good', 'warning', 'quality_issue'], true) ? $lastStatus : 'good';
     }
 
+    public function lastQualityCheckAt(Order $order): ?Carbon
+    {
+        $timestamp = data_get($order->production_protocol, 'last_quality_check_at');
+
+        return is_string($timestamp) && $timestamp !== '' ? Carbon::parse($timestamp) : null;
+    }
+
+    public function qualityCheckOverdue(Order $order): bool
+    {
+        $lastCheck = $this->lastQualityCheckAt($order);
+
+        return $lastCheck === null || $lastCheck->lte(now()->subHours(3));
+    }
+
+    public function protocolEntryAppearance(string $type, ?string $qualityStatus = null): array
+    {
+        if ($type === 'quality_check') {
+            return match ($qualityStatus) {
+                'good' => ['container' => 'border-l-4 border-emerald-500 bg-emerald-50', 'badge' => 'bg-emerald-100 text-emerald-800', 'icon' => '✓'],
+                'warning' => ['container' => 'border-l-4 border-amber-500 bg-amber-50', 'badge' => 'bg-amber-100 text-amber-800', 'icon' => '!'],
+                'quality_issue' => ['container' => 'border-l-4 border-red-500 bg-red-50', 'badge' => 'bg-red-100 text-red-800', 'icon' => '!'],
+                default => ['container' => 'border-l-4 border-teal-500 bg-teal-50', 'badge' => 'bg-teal-100 text-teal-800', 'icon' => '✓'],
+            };
+        }
+
+        return match ($type) {
+            'machine_issue', 'mould_issue', 'issue' => ['container' => 'border-l-4 border-red-500 bg-red-50', 'badge' => 'bg-red-100 text-red-800', 'icon' => '!'],
+            'parameter_change' => ['container' => 'border-l-4 border-amber-500 bg-amber-50', 'badge' => 'bg-amber-100 text-amber-800', 'icon' => '⚙'],
+            'machine_status', 'mould_status' => ['container' => 'border-l-4 border-blue-500 bg-blue-50', 'badge' => 'bg-blue-100 text-blue-800', 'icon' => '↻'],
+            'assignment', 'task_started' => ['container' => 'border-l-4 border-violet-500 bg-violet-50', 'badge' => 'bg-violet-100 text-violet-800', 'icon' => '▶'],
+            'order_status', 'production_update' => ['container' => 'border-l-4 border-cyan-500 bg-cyan-50', 'badge' => 'bg-cyan-100 text-cyan-800', 'icon' => '↔'],
+            default => ['container' => 'border-l-4 border-slate-400 bg-slate-50', 'badge' => 'bg-slate-200 text-slate-700', 'icon' => '•'],
+        };
+    }
+
     private function pauseOrdersFor(string $column, int $id, string $reason): void
     {
         Order::query()->where($column, $id)->where('status', 'in_progress')->each(function (Order $order) use ($reason): void {
@@ -691,7 +812,7 @@ new class extends Component
         });
     }
 
-    private function appendProtocolEntry(Order $order, int $quantity, string $type, string $note): void
+    private function appendProtocolEntry(Order $order, int $quantity, string $type, string $note, array $meta = []): void
     {
         $protocol = $order->production_protocol ?? [];
         $entries = $protocol['entries'] ?? [];
@@ -700,6 +821,9 @@ new class extends Component
             'entry_type' => $type,
             'current_quantity' => max(0, min($quantity, $order->quantity)),
             'note' => $note,
+            'meta' => $meta,
+            'signed_by' => Auth::user()?->name ?? 'API',
+            'signed_by_user_id' => Auth::id(),
         ];
         $order->update([
             'current_quantity' => max(0, min($quantity, $order->quantity)),
@@ -793,7 +917,7 @@ new class extends Component
         @endif
 
         @if ($activeTab === 'machines')
-            <section>
+            <section wire:poll.60s>
                 <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
                     <div>
                         <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('machines') }}</h1>
@@ -843,9 +967,17 @@ new class extends Component
                                             <span wire:key="quality-status-{{ $order->id }}-{{ $this->qualityStatus($order) }}" @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($this->qualityStatus($order))])>
                                                 {{ $this->t('quality') }}: {{ $this->statusLabel($this->qualityStatus($order)) }}
                                             </span>
+                                            @php($lastQualityCheck = $this->lastQualityCheckAt($order))
+                                            <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', 'bg-red-100 text-red-800' => $this->qualityCheckOverdue($order), 'bg-slate-100 text-slate-700' => ! $this->qualityCheckOverdue($order)])>
+                                                {{ $lastQualityCheck ? $this->t('last_quality_check_at', ['time' => $lastQualityCheck->format('Y-m-d H:i:s P')]) : $this->t('no_quality_check_yet') }}
+                                            </span>
+                                            @if ($this->qualityCheckOverdue($order))
+                                                <span class="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">{{ $this->t('quality_check_overdue') }}</span>
+                                            @endif
                                             @if ($this->canCheckQuality())
                                                 <button wire:click.stop="openQualityModal({{ $order->id }})" class="rounded-md border border-teal-300 bg-white px-3 py-1 text-xs font-bold text-teal-800 hover:bg-teal-100">{{ $this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'color_check' : 'quality_check') }}</button>
                                             @endif
+                                            <button wire:click.stop="openProductionProtocol({{ $order->id }})" class="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100">{{ $this->t('production_protocol') }}</button>
                                         </div>
                                     </div>
                                 @else
@@ -929,6 +1061,7 @@ new class extends Component
                                 @if ($this->canDo(\App\Enums\Role::ACTIVATE_ORDER) && in_array($order->status, ['waiting', 'paused'], true))
                                     <button wire:click="activateOrder({{ $order->id }})" class="rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t($order->status === 'paused' ? 'resume' : 'activate') }}</button>
                                 @endif
+                                <button wire:click="openProductionProtocol({{ $order->id }})" class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">{{ $this->t('production_protocol') }}</button>
                             </div>
                         @empty
                             <p class="text-sm text-slate-500 md:col-span-2">{{ $this->t('no_waiting_orders') }}</p>
@@ -1095,6 +1228,70 @@ new class extends Component
 
     @if ($showOrderModal)
         <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold">{{ $this->t('manage_order') }}</h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold">{{ $this->t('status') }}<select wire:model.live="orderStatus" class="mt-1 w-full rounded-md border-slate-300">@if (! $this->isAdmin())<option value="">{{ $this->t('select_status') }}</option>@endif @if ($this->isAdmin())<option value="in_progress">{{ $this->t('in_progress') }}</option><option value="paused">{{ $this->t('paused') }}</option><option value="completed">{{ $this->t('completed') }}</option><option value="interrupted">{{ $this->t('interrupted') }}</option>@else<option value="paused">{{ $this->t('paused') }}</option><option value="interrupted">{{ $this->t('interrupted') }}</option>@endif</select></label><label class="text-sm font-semibold">{{ $this->t('current_quantity') }}<input wire:model="currentQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@if(in_array($orderStatus, ['completed', 'interrupted'], true))<label class="text-sm font-semibold">{{ $this->t('good_quantity') }}<input wire:model="goodQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><label class="text-sm font-semibold">{{ $this->t('bad_quantity') }}<input wire:model="badQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@endif</div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showOrderModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="saveOrder" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('save') }}</button></div></div></div>
+    @endif
+
+    @if ($showProtocolModal && ($protocolOrder = \App\Models\Order::query()->find($protocolOrderId)))
+        @php($protocol = $protocolOrder->production_protocol ?? [])
+        @php($entries = collect($protocol['entries'] ?? [])->sortByDesc(fn (array $entry) => $entry['timestamp'] ?? ''))
+        <div class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4">
+            <div class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+                <div class="flex items-start justify-between gap-3 border-b-4 border-teal-600 px-5 py-4">
+                    <div>
+                        <h2 class="text-xl font-bold">{{ $this->t('production_protocol') }} · {{ $protocolOrder->order_number }}</h2>
+                        <p class="text-sm text-slate-500">{{ $protocolOrder->machine?->name }} · {{ $protocolOrder->product?->name }}</p>
+                    </div>
+                    <button wire:click="$set('showProtocolModal', false)" class="rounded-md px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100" aria-label="{{ $this->t('close') }}">&times;</button>
+                </div>
+
+                <div class="space-y-5 overflow-y-auto p-5">
+                    <section>
+                        <h3 class="font-bold">{{ $this->t('protocol_entries') }}</h3>
+                        <ol class="mt-3 space-y-3">
+                            @forelse ($entries as $entry)
+                                @php($appearance = $this->protocolEntryAppearance(data_get($entry, 'entry_type', 'note'), data_get($entry, 'meta.quality_status')))
+                                <li wire:key="protocol-entry-{{ $protocolOrder->id }}-{{ $loop->index }}" class="rounded-r-lg {{ $appearance['container'] }} p-4">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <span class="inline-flex items-center gap-2">
+                                            <span class="flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold {{ $appearance['badge'] }}" aria-hidden="true">{{ $appearance['icon'] }}</span>
+                                            <span class="rounded-full px-2.5 py-1 text-xs font-bold {{ $appearance['badge'] }}">{{ $this->t('protocol_type_'.data_get($entry, 'entry_type', 'note')) }}</span>
+                                        </span>
+                                        <time class="text-sm text-slate-600">{{ \Illuminate\Support\Carbon::parse(data_get($entry, 'timestamp'))->format('Y-m-d H:i:s P') }}</time>
+                                    </div>
+                                    <p class="mt-2 whitespace-pre-wrap text-sm">{{ data_get($entry, 'note', '') }}</p>
+                                    <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                                        <span>{{ $this->t('signed_by') }}: {{ data_get($entry, 'signed_by', $this->t('unknown_signer')) }}</span>
+                                        <span>{{ $this->t('current_quantity') }}: {{ data_get($entry, 'current_quantity', $protocolOrder->current_quantity) }}</span>
+                                    </div>
+                                </li>
+                            @empty
+                                <li class="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">{{ $this->t('no_protocol_entries') }}</li>
+                            @endforelse
+                        </ol>
+                    </section>
+
+                    <section class="rounded-lg border border-slate-200 p-4">
+                        <h3 class="font-bold">{{ $this->t('add_protocol_entry') }}</h3>
+                        <div class="mt-3 grid gap-3">
+                            <label class="text-sm font-semibold">{{ $this->t('protocol_entry_type') }}
+                                <select wire:model="protocolEntryType" class="mt-1 w-full rounded-md border-slate-300">
+                                    @foreach (['note', 'parameter_change', 'machine_issue', 'mould_issue', 'other'] as $type)
+                                        <option value="{{ $type }}">{{ $this->t('protocol_type_'.$type) }}</option>
+                                    @endforeach
+                                </select>
+                            </label>
+                            <label class="text-sm font-semibold">{{ $this->t('protocol_entry_note') }}
+                                <textarea wire:model="protocolEntryNote" rows="3" maxlength="2000" class="mt-1 w-full rounded-md border-slate-300"></textarea>
+                                @error('protocolEntryNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
+                            </label>
+                        </div>
+                        <div class="mt-4 flex justify-end gap-3">
+                            <button wire:click="$set('showProtocolModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button>
+                            <button wire:click="addProductionProtocolEntry" wire:loading.attr="disabled" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('save') }}</button>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
     @endif
 
     @if ($showQualityModal)

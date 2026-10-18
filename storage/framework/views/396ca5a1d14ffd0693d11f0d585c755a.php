@@ -1,6 +1,6 @@
 <?php
-use App\Enums\Role;
 use App\Auth\TabAuthentication;
+use App\Enums\Role;
 use App\Models\Machine;
 use App\Models\Mould;
 use App\Models\Order;
@@ -120,7 +120,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
         <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
 
         <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($activeTab === 'machines'): ?>
-            <section>
+            <section wire:poll.60s>
                 <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
                     <div>
                         <h1 class="text-2xl font-bold text-slate-900"><?php echo e($this->t('machines')); ?></h1>
@@ -171,9 +171,18 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                                                 <?php echo e($this->t('quality')); ?>: <?php echo e($this->statusLabel($this->qualityStatus($order))); ?>
 
                                             </span>
+                                            <?php ($lastQualityCheck = $this->lastQualityCheckAt($order)); ?>
+                                            <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['rounded-full px-2.5 py-1 text-xs font-bold', 'bg-red-100 text-red-800' => $this->qualityCheckOverdue($order), 'bg-slate-100 text-slate-700' => ! $this->qualityCheckOverdue($order)]); ?>">
+                                                <?php echo e($lastQualityCheck ? $this->t('last_quality_check_at', ['time' => $lastQualityCheck->format('Y-m-d H:i:s P')]) : $this->t('no_quality_check_yet')); ?>
+
+                                            </span>
+                                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->qualityCheckOverdue($order)): ?>
+                                                <span class="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800"><?php echo e($this->t('quality_check_overdue')); ?></span>
+                                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                                             <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canCheckQuality()): ?>
                                                 <button wire:click.stop="openQualityModal(<?php echo e($order->id); ?>)" class="rounded-md border border-teal-300 bg-white px-3 py-1 text-xs font-bold text-teal-800 hover:bg-teal-100"><?php echo e($this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'color_check' : 'quality_check')); ?></button>
                                             <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                                            <button wire:click.stop="openProductionProtocol(<?php echo e($order->id); ?>)" class="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100"><?php echo e($this->t('production_protocol')); ?></button>
                                         </div>
                                     </div>
                                 <?php else: ?>
@@ -258,6 +267,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                                 <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canDo(\App\Enums\Role::ACTIVATE_ORDER) && in_array($order->status, ['waiting', 'paused'], true)): ?>
                                     <button wire:click="activateOrder(<?php echo e($order->id); ?>)" class="rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800"><?php echo e($this->t($order->status === 'paused' ? 'resume' : 'activate')); ?></button>
                                 <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                                <button wire:click="openProductionProtocol(<?php echo e($order->id); ?>)" class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100"><?php echo e($this->t('production_protocol')); ?></button>
                             </div>
                         <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
                             <p class="text-sm text-slate-500 md:col-span-2"><?php echo e($this->t('no_waiting_orders')); ?></p>
@@ -431,6 +441,79 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
 
     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($showOrderModal): ?>
         <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold"><?php echo e($this->t('manage_order')); ?></h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold"><?php echo e($this->t('status')); ?><select wire:model.live="orderStatus" class="mt-1 w-full rounded-md border-slate-300"><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if(! $this->isAdmin()): ?><option value=""><?php echo e($this->t('select_status')); ?></option><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?> <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->isAdmin()): ?><option value="in_progress"><?php echo e($this->t('in_progress')); ?></option><option value="paused"><?php echo e($this->t('paused')); ?></option><option value="completed"><?php echo e($this->t('completed')); ?></option><option value="interrupted"><?php echo e($this->t('interrupted')); ?></option><?php else: ?><option value="paused"><?php echo e($this->t('paused')); ?></option><option value="interrupted"><?php echo e($this->t('interrupted')); ?></option><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></select></label><label class="text-sm font-semibold"><?php echo e($this->t('current_quantity')); ?><input wire:model="currentQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if(in_array($orderStatus, ['completed', 'interrupted'], true)): ?><label class="text-sm font-semibold"><?php echo e($this->t('good_quantity')); ?><input wire:model="goodQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><label class="text-sm font-semibold"><?php echo e($this->t('bad_quantity')); ?><input wire:model="badQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showOrderModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600"><?php echo e($this->t('cancel')); ?></button><button wire:click="saveOrder" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white"><?php echo e($this->t('save')); ?></button></div></div></div>
+    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+
+    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($showProtocolModal && ($protocolOrder = \App\Models\Order::query()->find($protocolOrderId))): ?>
+        <?php ($protocol = $protocolOrder->production_protocol ?? []); ?>
+        <?php ($entries = collect($protocol['entries'] ?? [])->sortByDesc(fn (array $entry) => $entry['timestamp'] ?? '')); ?>
+        <div class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4">
+            <div class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+                <div class="flex items-start justify-between gap-3 border-b-4 border-teal-600 px-5 py-4">
+                    <div>
+                        <h2 class="text-xl font-bold"><?php echo e($this->t('production_protocol')); ?> · <?php echo e($protocolOrder->order_number); ?></h2>
+                        <p class="text-sm text-slate-500"><?php echo e($protocolOrder->machine?->name); ?> · <?php echo e($protocolOrder->product?->name); ?></p>
+                    </div>
+                    <button wire:click="$set('showProtocolModal', false)" class="rounded-md px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100" aria-label="<?php echo e($this->t('close')); ?>">&times;</button>
+                </div>
+
+                <div class="space-y-5 overflow-y-auto p-5">
+                    <section>
+                        <h3 class="font-bold"><?php echo e($this->t('protocol_entries')); ?></h3>
+                        <ol class="mt-3 space-y-3">
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $entries; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $entry): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                                <?php ($appearance = $this->protocolEntryAppearance(data_get($entry, 'entry_type', 'note'), data_get($entry, 'meta.quality_status'))); ?>
+                                <li <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'protocol-entry-'.e($protocolOrder->id).'-'.e($loop->index).''; ?>wire:key="protocol-entry-<?php echo e($protocolOrder->id); ?>-<?php echo e($loop->index); ?>" class="rounded-r-lg <?php echo e($appearance['container']); ?> p-4">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <span class="inline-flex items-center gap-2">
+                                            <span class="flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold <?php echo e($appearance['badge']); ?>" aria-hidden="true"><?php echo e($appearance['icon']); ?></span>
+                                            <span class="rounded-full px-2.5 py-1 text-xs font-bold <?php echo e($appearance['badge']); ?>"><?php echo e($this->t('protocol_type_'.data_get($entry, 'entry_type', 'note'))); ?></span>
+                                        </span>
+                                        <time class="text-sm text-slate-600"><?php echo e(\Illuminate\Support\Carbon::parse(data_get($entry, 'timestamp'))->format('Y-m-d H:i:s P')); ?></time>
+                                    </div>
+                                    <p class="mt-2 whitespace-pre-wrap text-sm"><?php echo e(data_get($entry, 'note', '')); ?></p>
+                                    <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                                        <span><?php echo e($this->t('signed_by')); ?>: <?php echo e(data_get($entry, 'signed_by', $this->t('unknown_signer'))); ?></span>
+                                        <span><?php echo e($this->t('current_quantity')); ?>: <?php echo e(data_get($entry, 'current_quantity', $protocolOrder->current_quantity)); ?></span>
+                                    </div>
+                                </li>
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                                <li class="rounded-lg bg-slate-50 p-4 text-sm text-slate-500"><?php echo e($this->t('no_protocol_entries')); ?></li>
+                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                        </ol>
+                    </section>
+
+                    <section class="rounded-lg border border-slate-200 p-4">
+                        <h3 class="font-bold"><?php echo e($this->t('add_protocol_entry')); ?></h3>
+                        <div class="mt-3 grid gap-3">
+                            <label class="text-sm font-semibold"><?php echo e($this->t('protocol_entry_type')); ?>
+
+                                <select wire:model="protocolEntryType" class="mt-1 w-full rounded-md border-slate-300">
+                                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = ['note', 'parameter_change', 'machine_issue', 'mould_issue', 'other']; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $type): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                                        <option value="<?php echo e($type); ?>"><?php echo e($this->t('protocol_type_'.$type)); ?></option>
+                                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                                </select>
+                            </label>
+                            <label class="text-sm font-semibold"><?php echo e($this->t('protocol_entry_note')); ?>
+
+                                <textarea wire:model="protocolEntryNote" rows="3" maxlength="2000" class="mt-1 w-full rounded-md border-slate-300"></textarea>
+                                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__errorArgs = ['protocolEntryNote'];
+$__bag = $errors->getBag($__errorArgs[1] ?? 'default');
+if ($__bag->has($__errorArgs[0])) :
+if (isset($message)) { $__messageOriginal = $message; }
+$message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600"><?php echo e($message); ?></span><?php unset($message);
+if (isset($__messageOriginal)) { $message = $__messageOriginal; }
+endif;
+unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                            </label>
+                        </div>
+                        <div class="mt-4 flex justify-end gap-3">
+                            <button wire:click="$set('showProtocolModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600"><?php echo e($this->t('cancel')); ?></button>
+                            <button wire:click="addProductionProtocolEntry" wire:loading.attr="disabled" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white"><?php echo e($this->t('save')); ?></button>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
 
     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($showQualityModal): ?>

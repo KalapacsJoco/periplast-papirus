@@ -246,6 +246,49 @@ class RolePermissionsTest extends TestCase
             ->assertSee('Scheduled inspection');
     }
 
+    public function test_machine_status_changes_are_signed_in_the_active_order_protocol(): void
+    {
+        $operator = User::factory()->create(['name' => 'Signed Operator', 'role' => Role::Operator]);
+        $order = Order::factory()->create(['status' => 'in_progress']);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openMachineModal', $order->machine_id)
+            ->set('status', 'warning')
+            ->set('problemDescription', 'Pressure drift')
+            ->call('saveMachineStatus');
+
+        $entry = $order->fresh()->production_protocol['entries'][0];
+        $this->assertSame('machine_status', $entry['entry_type']);
+        $this->assertSame('Signed Operator', $entry['signed_by']);
+        $this->assertSame($operator->id, $entry['signed_by_user_id']);
+        $this->assertStringContainsString('Pressure drift', $entry['note']);
+        $this->assertNotEmpty($entry['timestamp']);
+    }
+
+    public function test_manual_production_protocol_entries_include_timestamp_and_signature(): void
+    {
+        $operator = User::factory()->create(['name' => 'Protocol Operator', 'role' => Role::Operator]);
+        $order = Order::factory()->create(['status' => 'in_progress']);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openProductionProtocol', $order->id)
+            ->set('protocolEntryType', 'parameter_change')
+            ->set('protocolEntryNote', 'Injection pressure changed to 850 bar')
+            ->call('addProductionProtocolEntry')
+            ->assertSee('Injection pressure changed to 850 bar')
+            ->assertSee('Protocol Operator')
+            ->assertSee('border-amber-500')
+            ->assertSee('⚙');
+
+        $entry = $order->fresh()->production_protocol['entries'][0];
+        $this->assertSame('parameter_change', $entry['entry_type']);
+        $this->assertSame('Protocol Operator', $entry['signed_by']);
+        $this->assertSame($operator->id, $entry['signed_by_user_id']);
+        $this->assertNotEmpty($entry['timestamp']);
+    }
+
     public function test_quality_manager_can_warn_or_stop_but_not_start_a_machine(): void
     {
         $qualityManager = User::factory()->create(['role' => Role::QualityManager]);

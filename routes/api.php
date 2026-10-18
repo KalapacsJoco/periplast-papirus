@@ -1,30 +1,13 @@
 <?php
 
+use App\Models\Error;
 use App\Models\Machine;
 use App\Models\Mould;
 use App\Models\Order;
 use App\Models\Product;
-use App\Models\Error;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
-
-$pauseRunningOrders = function (array $constraints, string $reason): void {
-    $query = Order::query()->where('status', 'in_progress');
-
-    foreach ($constraints as $column => $value) {
-        $query->where($column, $value);
-    }
-
-    $query->get()->each(function (Order $order) use ($reason) {
-        $order->update([
-            'status' => 'paused',
-            'pause_description' => $reason,
-            'last_paused_at' => $order->last_paused_at ?? now(),
-            'good_quantity' => $order->good_quantity ?? (int) ($order->current_quantity ?? 0),
-            'bad_quantity' => $order->bad_quantity ?? 0,
-        ]);
-    });
-};
 
 $appendProtocolEntry = function (
     Order $order,
@@ -44,6 +27,8 @@ $appendProtocolEntry = function (
         'current_quantity' => $clampedQuantity,
         'note' => $note,
         'meta' => $meta,
+        'signed_by' => auth()->user()?->name ?? 'API',
+        'signed_by_user_id' => auth()->id(),
     ];
 
     $order->update([
@@ -56,6 +41,25 @@ $appendProtocolEntry = function (
     return $order->refresh();
 };
 
+$pauseRunningOrders = function (array $constraints, string $reason) use ($appendProtocolEntry): void {
+    $query = Order::query()->where('status', 'in_progress');
+
+    foreach ($constraints as $column => $value) {
+        $query->where($column, $value);
+    }
+
+    $query->get()->each(function (Order $order) use ($reason, $appendProtocolEntry): void {
+        $order->update([
+            'status' => 'paused',
+            'pause_description' => $reason,
+            'last_paused_at' => $order->last_paused_at ?? now(),
+            'good_quantity' => $order->good_quantity ?? (int) ($order->current_quantity ?? 0),
+            'bad_quantity' => $order->bad_quantity ?? 0,
+        ]);
+        $appendProtocolEntry($order->refresh(), (int) $order->current_quantity, 'issue', $reason);
+    });
+};
+
 Route::get('/machines', function () {
     return Machine::query()
         ->select(['id', 'name', 'type', 'open_mm', 'screw_diameter_cm', 'status', 'problem_description'])
@@ -64,7 +68,7 @@ Route::get('/machines', function () {
 });
 
 // Update machine status
-Route::post('/machines/{id}/status', function (Illuminate\Http\Request $request, $id) use ($pauseRunningOrders) {
+Route::post('/machines/{id}/status', function (Request $request, $id) use ($pauseRunningOrders, $appendProtocolEntry) {
     $validated = $request->validate([
         'status' => 'required|in:active,stopped,warning,broken,setup',
         'problem_description' => 'nullable|string',
@@ -88,6 +92,17 @@ Route::post('/machines/{id}/status', function (Illuminate\Http\Request $request,
 
     $machine->update(['status' => $status, 'problem_description' => $problem_description]);
 
+    Order::query()
+        ->where('machine_id', $machine->id)
+        ->whereIn('status', ['in_progress', 'paused'])
+        ->get()
+        ->each(fn (Order $order) => $appendProtocolEntry(
+            $order,
+            (int) $order->current_quantity,
+            'machine_status',
+            'Machine status changed to '.$status.($problem_description ? ': '.$problem_description : '')
+        ));
+
     if ($status === 'broken') {
         $pauseRunningOrders([
             'machine_id' => $machine->id,
@@ -98,20 +113,30 @@ Route::post('/machines/{id}/status', function (Illuminate\Http\Request $request,
 });
 
 // Restore a broken machine
-Route::post('/machines/{id}/restore', function ($id) {
+Route::post('/machines/{id}/restore', function ($id) use ($appendProtocolEntry) {
     $machine = Machine::findOrFail($id);
-    
+
     if ($machine->status === 'broken') {
         $error = $machine->errors()
             ->where('status', 'open')
             ->latest('date')
             ->first();
-        
+
         if ($error) {
             $error->update(['status' => 'resolved', 'restored_at' => now()]);
         }
 
         $machine->update(['status' => 'active', 'problem_description' => null]);
+        Order::query()
+            ->where('machine_id', $machine->id)
+            ->whereIn('status', ['in_progress', 'paused'])
+            ->get()
+            ->each(fn (Order $order) => $appendProtocolEntry(
+                $order,
+                (int) $order->current_quantity,
+                'machine_status',
+                'Machine restored to active.'
+            ));
     }
 
     return $machine;
@@ -122,12 +147,12 @@ Route::post('/machines/{id}/restore', function ($id) {
 Route::get('/moulds', function () {
     return Mould::query()
         ->select(['id', 'name', 'type', 'number', 'cavity_count', 'open_mm', 'status', 'problem_description'])
-    ->with(['products:id,name,code'])
+        ->with(['products:id,name,code'])
         ->orderBy('name')
         ->get();
 });
 
-Route::post('/moulds/{id}/status', function (Illuminate\Http\Request $request, $id) use ($pauseRunningOrders) {
+Route::post('/moulds/{id}/status', function (Request $request, $id) use ($pauseRunningOrders, $appendProtocolEntry) {
     $validated = $request->validate([
         'status' => 'required|in:active,standby,warning,needs_repair,under_repair',
         'problem_description' => 'nullable|string',
@@ -143,6 +168,17 @@ Route::post('/moulds/{id}/status', function (Illuminate\Http\Request $request, $
         'status' => $status,
         'problem_description' => $problemDescription,
     ]);
+
+    Order::query()
+        ->where('mould_id', $mould->id)
+        ->whereIn('status', ['in_progress', 'paused'])
+        ->get()
+        ->each(fn (Order $order) => $appendProtocolEntry(
+            $order,
+            (int) $order->current_quantity,
+            'mould_status',
+            'Mould status changed to '.$status.($problemDescription ? ': '.$problemDescription : '')
+        ));
 
     if ($status === 'needs_repair') {
         $pauseRunningOrders([
@@ -182,7 +218,7 @@ Route::get('/orders', function () {
         ->get();
 });
 
-Route::post('/orders/{id}/status', function (Illuminate\Http\Request $request, $id) {
+Route::post('/orders/{id}/status', function (Request $request, $id) use ($appendProtocolEntry) {
     $validated = $request->validate([
         'status' => 'required|in:waiting,in_progress,paused,completed,interrupted',
         'pause_description' => 'nullable|string',
@@ -245,11 +281,19 @@ Route::post('/orders/{id}/status', function (Illuminate\Http\Request $request, $
         'good_quantity' => $goodQuantity,
         'bad_quantity' => $badQuantity,
     ]);
+    if ($previousStatus !== $status) {
+        $appendProtocolEntry(
+            $order->refresh(),
+            $currentQuantity,
+            'order_status',
+            'Order status changed from '.$previousStatus.' to '.$status.($pauseDescription ? ': '.$pauseDescription : '')
+        );
+    }
 
     return $order->load(['machine:id,name,status,problem_description', 'mould:id,name,number,cavity_count,status,problem_description', 'product:id,name,code,is_active']);
 });
 
-Route::post('/orders/{id}/production-data', function (Illuminate\Http\Request $request, $id) {
+Route::post('/orders/{id}/production-data', function (Request $request, $id) use ($appendProtocolEntry) {
     $validated = $request->validate([
         'current_quantity' => 'required|integer|min:0',
     ]);
@@ -266,6 +310,14 @@ Route::post('/orders/{id}/production-data', function (Illuminate\Http\Request $r
         'ended_at' => $willBeCompleted ? ($order->ended_at ?? now()) : null,
         'last_paused_at' => $willBeCompleted ? null : $order->last_paused_at,
     ]);
+    if ($order->wasChanged('current_quantity')) {
+        $appendProtocolEntry(
+            $order->refresh(),
+            $currentQuantity,
+            'production_update',
+            'Production quantity updated.'
+        );
+    }
 
     return $order->load([
         'machine:id,name,status,problem_description',
@@ -274,7 +326,7 @@ Route::post('/orders/{id}/production-data', function (Illuminate\Http\Request $r
     ]);
 });
 
-Route::post('/orders/{id}/protocol', function (Illuminate\Http\Request $request, $id) {
+Route::post('/orders/{id}/protocol', function (Request $request, $id) use ($appendProtocolEntry) {
     $validated = $request->validate([
         'machine_name' => 'nullable|string|max:255',
         'part_code' => 'nullable|string|max:255',
@@ -290,6 +342,13 @@ Route::post('/orders/{id}/protocol', function (Illuminate\Http\Request $request,
 
     $order = Order::findOrFail($id);
     $existingProtocol = is_array($order->production_protocol) ? $order->production_protocol : [];
+    $previousParameters = [
+        'cycle_time' => $order->cycle_time,
+        'quantity' => $order->quantity,
+        'gross_weight' => $order->gross_weight,
+        'net_weight' => $order->net_weight,
+        'color_percentage' => $order->color_percentage,
+    ];
 
     $order->update([
         'cycle_time' => $validated['cycle_time'] ?? $order->cycle_time,
@@ -314,6 +373,24 @@ Route::post('/orders/{id}/protocol', function (Illuminate\Http\Request $request,
         ]),
     ]);
 
+    $order->refresh();
+    $newParameters = [
+        'cycle_time' => $order->cycle_time,
+        'quantity' => $order->quantity,
+        'gross_weight' => $order->gross_weight,
+        'net_weight' => $order->net_weight,
+        'color_percentage' => $order->color_percentage,
+    ];
+    if ($previousParameters !== $newParameters) {
+        $appendProtocolEntry(
+            $order->refresh(),
+            (int) $order->current_quantity,
+            'parameter_change',
+            'Production parameters updated.',
+            ['before' => $previousParameters, 'after' => $newParameters]
+        );
+    }
+
     return $order->load([
         'machine:id,name,status,problem_description',
         'mould:id,name,number,cavity_count,status,problem_description',
@@ -321,7 +398,7 @@ Route::post('/orders/{id}/protocol', function (Illuminate\Http\Request $request,
     ]);
 });
 
-Route::post('/orders/{id}/quality-check', function (Illuminate\Http\Request $request, $id) use ($appendProtocolEntry) {
+Route::post('/orders/{id}/quality-check', function (Request $request, $id) use ($appendProtocolEntry) {
     $validated = $request->validate([
         'quality_status' => 'required|in:good,warning,quality_issue',
         'problem_type' => 'nullable|required_unless:quality_status,good|in:surface_defect,dimension_issue,color_issue,material_issue,burn_mark,flash,short_shot,contamination,other',
@@ -356,6 +433,8 @@ Route::post('/orders/{id}/quality-check', function (Illuminate\Http\Request $req
 
     $qualityChecks[] = [
         'checked_at' => $checkedAt->toIso8601String(),
+        'signed_by' => $request->user()?->name ?? 'API',
+        'signed_by_user_id' => $request->user()?->getAuthIdentifier(),
         'quality_status' => $qualityStatus,
         'protocol_entry' => $qualityStatus === 'good' ? 'IO' : ($problemType === 'other' ? (string) $problemNote : (string) $problemType),
         'current_quantity' => $currentQuantity,
@@ -414,10 +493,10 @@ Route::post('/orders/{id}/quality-check', function (Illuminate\Http\Request $req
     ]);
 });
 
-Route::post('/orders/{id}/protocol-entry', function (Illuminate\Http\Request $request, $id) use ($appendProtocolEntry) {
+Route::post('/orders/{id}/protocol-entry', function (Request $request, $id) use ($appendProtocolEntry) {
     $validated = $request->validate([
         'current_quantity' => 'required|integer|min:0',
-        'entry_type' => 'required|in:quality_check,order_status,machine_issue,mould_issue,product_status,protocol_update,note',
+        'entry_type' => 'required|in:quality_check,order_status,machine_issue,mould_issue,product_status,protocol_update,note,parameter_change,machine_status,mould_status,production_update,assignment,task_started,issue',
         'note' => 'nullable|string|max:2000',
         'meta' => 'nullable|array',
     ]);
@@ -438,7 +517,7 @@ Route::post('/orders/{id}/protocol-entry', function (Illuminate\Http\Request $re
     ]);
 });
 
-Route::post('/products/{id}/status', function (Illuminate\Http\Request $request, $id) {
+Route::post('/products/{id}/status', function (Request $request, $id) use ($appendProtocolEntry) {
     $validated = $request->validate([
         'status' => 'required|in:active,inactive',
     ]);
@@ -448,6 +527,17 @@ Route::post('/products/{id}/status', function (Illuminate\Http\Request $request,
     $product->update([
         'is_active' => $validated['status'] === 'active',
     ]);
+
+    Order::query()
+        ->where('product_id', $product->id)
+        ->whereIn('status', ['in_progress', 'paused'])
+        ->get()
+        ->each(fn (Order $order) => $appendProtocolEntry(
+            $order,
+            (int) $order->current_quantity,
+            'product_status',
+            'Product status changed to '.$validated['status'].'.'
+        ));
 
     return $product->load([
         'material:id,name,code',
