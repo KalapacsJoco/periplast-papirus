@@ -136,8 +136,24 @@ class ExampleTest extends TestCase
         }
     }
 
+    public function test_api_rejects_requests_without_a_valid_key(): void
+    {
+        config(['services.api_key' => 'secret-key']);
+
+        $this->getJson('/api/orders')->assertUnauthorized();
+        $this->getJson('/api/orders', ['X-API-Key' => 'wrong'])->assertUnauthorized();
+        $this->getJson('/api/orders', ['X-API-Key' => 'secret-key'])->assertOk();
+        $this->getJson('/api/orders', ['Authorization' => 'Bearer secret-key'])->assertOk();
+
+        config(['services.api_key' => null]);
+
+        $this->getJson('/api/orders', ['X-API-Key' => ''])->assertUnauthorized();
+    }
+
     public function test_api_machine_status_and_parameter_changes_are_signed_in_order_protocol(): void
     {
+        config(['services.api_key' => 'secret-key']);
+        $this->withHeader('X-API-Key', 'secret-key');
         $order = Order::factory()->create(['status' => 'in_progress']);
 
         $this->postJson('/api/machines/'.$order->machine_id.'/status', [
