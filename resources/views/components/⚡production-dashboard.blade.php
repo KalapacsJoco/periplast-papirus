@@ -45,6 +45,8 @@ new class extends Component
 
     public bool $showCalculatorModal = false;
 
+    public string $machineFilter = 'all';
+
     public ?int $calcProductId = null;
 
     public ?int $calcMouldId = null;
@@ -208,10 +210,42 @@ new class extends Component
         return Machine::query()
             ->with(['orders' => fn ($query) => $query
                 ->whereIn('status', ['in_progress', 'paused'])
-                ->with(['mould:id,name,number,cavity_count', 'product:id,name,code,planned_cycle_time'])
+                ->with(['mould:id,name,number,cavity_count,status', 'product:id,name,code,planned_cycle_time'])
                 ->orderByDesc('started_at')])
             ->orderBy('name')
             ->get();
+    }
+
+    public function machineHasWarning(Machine $machine): bool
+    {
+        if ($machine->status === 'warning') {
+            return true;
+        }
+
+        $order = $machine->orders->first();
+
+        return $order !== null
+            && ($order->mould?->status === 'warning' || $this->qualityStatus($order) === 'warning');
+    }
+
+    public function machineMatchesFilter(Machine $machine, string $filter): bool
+    {
+        return match ($filter) {
+            'active' => $machine->status === 'active',
+            'stopped' => $machine->status === 'stopped',
+            'warning' => $this->machineHasWarning($machine),
+            default => true,
+        };
+    }
+
+    public function machineCount(string $filter): int
+    {
+        return $this->machines->filter(fn (Machine $machine) => $this->machineMatchesFilter($machine, $filter))->count();
+    }
+
+    public function filterMachines(string $filter): void
+    {
+        $this->machineFilter = in_array($filter, ['active', 'stopped', 'warning'], true) && $this->machineFilter !== $filter ? $filter : 'all';
     }
 
     #[Computed]
@@ -1014,11 +1048,26 @@ new class extends Component
                         <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('machines') }}</h1>
                         <p class="mt-1 text-sm text-slate-600">{{ $this->t('dashboard_subtitle') }}</p>
                     </div>
-                    <span class="rounded-full bg-teal-100 px-3 py-1 text-sm font-semibold text-teal-800">{{ $this->t('machine_count', ['count' => $this->machines->count()]) }}</span>
+                    <span class="rounded-full bg-teal-100 px-3 py-1 text-sm font-semibold text-teal-800">{{ $this->t('machine_count', ['count' => $this->machineCount('all')]) }}</span>
+                </div>
+
+                <div class="mb-5 grid grid-cols-3 gap-3">
+                    @foreach (['active' => ['emerald', 'active'], 'warning' => ['amber', 'warning'], 'stopped' => ['red', 'stopped']] as $filter => [$color, $label])
+                        <button type="button" wire:click="filterMachines('{{ $filter }}')" aria-pressed="{{ $machineFilter === $filter ? 'true' : 'false' }}" @class([
+                            'rounded-xl border-2 bg-white p-3 text-left shadow-sm transition sm:p-4',
+                            'border-emerald-500 ring-2 ring-emerald-200' => $machineFilter === $filter && $color === 'emerald',
+                            'border-amber-500 ring-2 ring-amber-200' => $machineFilter === $filter && $color === 'amber',
+                            'border-red-500 ring-2 ring-red-200' => $machineFilter === $filter && $color === 'red',
+                            'border-slate-200 hover:border-slate-400' => $machineFilter !== $filter,
+                        ])>
+                            <span @class(['block text-2xl font-bold sm:text-3xl', 'text-emerald-700' => $color === 'emerald', 'text-amber-600' => $color === 'amber', 'text-red-600' => $color === 'red'])>{{ $this->machineCount($filter) }}</span>
+                            <span class="block text-xs font-semibold text-slate-600 sm:text-sm">{{ $this->t($label.'_machines') }}</span>
+                        </button>
+                    @endforeach
                 </div>
 
                 <div class="grid gap-5 lg:grid-cols-2">
-                    @forelse ($this->machines as $machine)
+                    @forelse ($this->machines->filter(fn ($machine) => $this->machineMatchesFilter($machine, $machineFilter)) as $machine)
                         @php($order = $machine->orders->first())
                         <article wire:key="machine-{{ $machine->id }}" wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}" class="cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600">
                             <div class="flex items-start justify-between gap-3 border-b border-slate-100 p-5">

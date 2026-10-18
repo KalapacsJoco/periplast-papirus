@@ -25,6 +25,28 @@ class ExampleTest extends TestCase
         $response->assertStatus(200);
     }
 
+    public function test_machine_status_cards_count_and_filter_machines_including_mould_and_product_warnings(): void
+    {
+        $user = User::factory()->create(['role' => Role::Operator]);
+        $active = Machine::factory()->create(['name' => 'M-ACTIVE', 'status' => 'active']);
+        Machine::factory()->create(['name' => 'M-STOPPED', 'status' => 'stopped']);
+        Machine::factory()->create(['name' => 'M-WARN', 'status' => 'warning']);
+        $mould = \App\Models\Mould::factory()->create(['status' => 'warning']);
+        Order::factory()->create(['machine_id' => $active->id, 'mould_id' => $mould->id, 'status' => 'in_progress']);
+
+        Livewire::actingAs($user)->test('production-dashboard')
+            ->assertSee('Aktív gépek')
+            ->call('filterMachines', 'warning')
+            ->assertSee('M-WARN')
+            ->assertSee('M-ACTIVE')
+            ->assertDontSee('M-STOPPED')
+            ->call('filterMachines', 'stopped')
+            ->assertSee('M-STOPPED')
+            ->assertDontSee('M-WARN')
+            ->call('filterMachines', 'stopped')
+            ->assertSet('machineFilter', 'all');
+    }
+
     public function test_production_time_calculator_loads_product_data_and_computes_duration(): void
     {
         $user = User::factory()->create(['role' => Role::Operator]);

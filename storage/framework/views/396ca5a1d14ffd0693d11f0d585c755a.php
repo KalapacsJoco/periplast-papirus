@@ -109,11 +109,26 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                         <h1 class="text-2xl font-bold text-slate-900"><?php echo e($this->t('machines')); ?></h1>
                         <p class="mt-1 text-sm text-slate-600"><?php echo e($this->t('dashboard_subtitle')); ?></p>
                     </div>
-                    <span class="rounded-full bg-teal-100 px-3 py-1 text-sm font-semibold text-teal-800"><?php echo e($this->t('machine_count', ['count' => $this->machines->count()])); ?></span>
+                    <span class="rounded-full bg-teal-100 px-3 py-1 text-sm font-semibold text-teal-800"><?php echo e($this->t('machine_count', ['count' => $this->machineCount('all')])); ?></span>
+                </div>
+
+                <div class="mb-5 grid grid-cols-3 gap-3">
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = ['active' => ['emerald', 'active'], 'warning' => ['amber', 'warning'], 'stopped' => ['red', 'stopped']]; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $filter => [$color, $label]): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                        <button type="button" wire:click="filterMachines('<?php echo e($filter); ?>')" aria-pressed="<?php echo e($machineFilter === $filter ? 'true' : 'false'); ?>" class="<?php echo \Illuminate\Support\Arr::toCssClasses([
+                            'rounded-xl border-2 bg-white p-3 text-left shadow-sm transition sm:p-4',
+                            'border-emerald-500 ring-2 ring-emerald-200' => $machineFilter === $filter && $color === 'emerald',
+                            'border-amber-500 ring-2 ring-amber-200' => $machineFilter === $filter && $color === 'amber',
+                            'border-red-500 ring-2 ring-red-200' => $machineFilter === $filter && $color === 'red',
+                            'border-slate-200 hover:border-slate-400' => $machineFilter !== $filter,
+                        ]); ?>">
+                            <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['block text-2xl font-bold sm:text-3xl', 'text-emerald-700' => $color === 'emerald', 'text-amber-600' => $color === 'amber', 'text-red-600' => $color === 'red']); ?>"><?php echo e($this->machineCount($filter)); ?></span>
+                            <span class="block text-xs font-semibold text-slate-600 sm:text-sm"><?php echo e($this->t($label.'_machines')); ?></span>
+                        </button>
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
                 </div>
 
                 <div class="grid gap-5 lg:grid-cols-2">
-                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->machines; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $machine): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->machines->filter(fn ($machine) => $this->machineMatchesFilter($machine, $machineFilter)); $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $machine): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
                         <?php ($order = $machine->orders->first()); ?>
                         <article <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'machine-'.e($machine->id).''; ?>wire:key="machine-<?php echo e($machine->id); ?>" wire:click="openMachineDetail(<?php echo e($machine->id); ?>)" wire:keydown.enter="openMachineDetail(<?php echo e($machine->id); ?>)" role="button" tabindex="0" title="<?php echo e($this->t('open_details')); ?>" class="cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600">
                             <div class="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
