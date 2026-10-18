@@ -7,6 +7,7 @@ use App\Models\Machine;
 use App\Models\Mould;
 use App\Models\Order;
 use App\Models\User;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -75,6 +76,7 @@ class RolePermissionsTest extends TestCase
     {
         $coordinator = User::factory()->create(['role' => Role::Coordinator]);
         $operator = User::factory()->create(['role' => Role::Operator]);
+        $replacementOperator = User::factory()->create(['role' => Role::Operator]);
         $order = Order::factory()->create(['status' => 'in_progress']);
 
         Livewire::actingAs($coordinator)
@@ -83,6 +85,78 @@ class RolePermissionsTest extends TestCase
 
         $this->assertSame($operator->id, $order->fresh()->assigned_operator_id);
         $this->assertSame('assigned', $operator->unreadNotifications()->firstOrFail()->data['event']);
+
+        Livewire::actingAs($coordinator)
+            ->test('production-dashboard')
+            ->call('assignOperator', $order->id, (string) $replacementOperator->id);
+
+        $this->assertSame($replacementOperator->id, $order->fresh()->assigned_operator_id);
+        $this->assertSame('assigned', $replacementOperator->unreadNotifications()->firstOrFail()->data['event']);
+    }
+
+    public function test_coordinator_cannot_assign_an_order_before_programmer_activates_it(): void
+    {
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $order = Order::factory()->create(['status' => 'waiting']);
+
+        try {
+            Livewire::actingAs($coordinator)
+                ->test('production-dashboard')
+                ->call('assignOperator', $order->id, (string) $operator->id);
+
+            $this->fail('A waiting order cannot be assigned.');
+        } catch (ModelNotFoundException) {
+        }
+
+        $this->assertNull($order->fresh()->assigned_operator_id);
+    }
+
+    public function test_coordinator_tasks_only_list_activated_orders_and_orders_page_has_no_assignment_section(): void
+    {
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $activatedOrder = Order::factory()->create(['order_number' => 'ORD-ACTIVE', 'status' => 'in_progress']);
+        $waitingOrder = Order::factory()->create(['order_number' => 'ORD-WAITING', 'status' => 'waiting']);
+
+        Livewire::actingAs($coordinator)
+            ->test('production-dashboard')
+            ->call('selectTab', 'tasks')
+            ->assertSet('activeTab', 'tasks')
+            ->assertSee($activatedOrder->order_number)
+            ->assertDontSee($waitingOrder->order_number)
+            ->call('selectTab', 'orders')
+            ->assertDontSee('Operátori feladatkiosztás');
+    }
+
+    public function test_operator_starts_only_an_assigned_active_task_and_machine_enters_setup(): void
+    {
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $otherOperator = User::factory()->create(['role' => Role::Operator]);
+        $order = Order::factory()->create([
+            'status' => 'in_progress',
+            'assigned_operator_id' => $operator->id,
+        ]);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('selectTab', 'tasks')
+            ->assertSee($order->order_number)
+            ->call('startAssignedTask', $order->id)
+            ->assertSee('Szerelés alatt');
+
+        $this->assertSame('setup', $order->machine->fresh()->status);
+        $this->assertNotNull($order->fresh()->task_started_at);
+
+        $this->assertSame('setup', $order->machine->fresh()->status);
+
+        try {
+            Livewire::actingAs($otherOperator)
+                ->test('production-dashboard')
+                ->call('startAssignedTask', $order->id);
+
+            $this->fail('An operator cannot start another operator’s task.');
+        } catch (ModelNotFoundException) {
+        }
     }
 
     public function test_all_roles_can_view_orders_but_only_programmer_can_activate_them(): void

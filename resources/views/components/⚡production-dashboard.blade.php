@@ -160,6 +160,7 @@ new class extends Component
         return match ($tab) {
             'machines' => true,
             'orders' => true,
+            'tasks' => $this->isAdmin() || $this->canDo(Role::ASSIGN_ORDER) || $this->canDo(Role::CHECK_COLOR),
             'moulds', 'products' => $this->isAdmin(),
             default => false,
         };
@@ -248,12 +249,12 @@ new class extends Component
     }
 
     #[Computed]
-    public function assignedOrders()
+    public function ordersForMyTasks()
     {
         return Order::query()
             ->where('assigned_operator_id', Auth::id())
             ->whereIn('status', ['in_progress', 'paused'])
-            ->with(['machine:id,name', 'product:id,name,code'])
+            ->with(['machine:id,name,status', 'product:id,name,code'])
             ->orderBy('order_number')
             ->get();
     }
@@ -568,7 +569,27 @@ new class extends Component
         }
 
         $this->flashMessage = $this->t('operator_assigned');
-        unset($this->ordersForAssignment, $this->assignedOrders);
+        unset($this->ordersForAssignment, $this->ordersForMyTasks);
+    }
+
+    public function startAssignedTask(int $orderId): void
+    {
+        abort_unless(Auth::user()?->role === Role::Operator, 403);
+
+        $order = Order::query()
+            ->where('assigned_operator_id', Auth::id())
+            ->where('status', 'in_progress')
+            ->whereNull('task_started_at')
+            ->findOrFail($orderId);
+
+        $order->update(['task_started_at' => now()]);
+        $order->machine()->update([
+            'status' => 'setup',
+            'problem_description' => null,
+        ]);
+
+        $this->flashMessage = $this->t('task_started');
+        unset($this->machines, $this->ordersForMyTasks);
     }
 
     public function markNotificationsRead(): void
@@ -609,7 +630,7 @@ new class extends Component
             'active', 'in_progress', 'good' => 'bg-emerald-100 text-emerald-800',
             'warning' => 'bg-amber-100 text-amber-800',
             'broken', 'needs_repair', 'quality_issue', 'interrupted' => 'bg-red-100 text-red-800',
-            'under_repair' => 'bg-blue-100 text-blue-800',
+            'under_repair', 'setup' => 'bg-blue-100 text-blue-800',
             default => 'bg-slate-200 text-slate-700',
         };
     }
@@ -625,6 +646,7 @@ new class extends Component
             'broken' => $this->t('broken'),
             'needs_repair' => $this->t('needs_repair'),
             'under_repair' => $this->t('under_repair'),
+            'setup' => $this->t('setup'),
             'in_progress' => $this->t('in_progress'),
             'paused' => $this->t('paused'),
             'completed' => $this->t('completed'),
@@ -732,7 +754,7 @@ new class extends Component
         </div>
         <nav class="border-t border-slate-100" aria-label="Main">
             <div class="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-2 [scrollbar-width:none] sm:px-4">
-                @foreach (['machines' => 'machines', 'moulds' => 'moulds', 'products' => 'products', 'orders' => 'orders'] as $tab => $label)
+                @foreach (['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'moulds' => 'moulds', 'products' => 'products'] as $tab => $label)
                     @if ($this->canViewTab($tab))
                     <button wire:click="selectTab('{{ $tab }}')" @class(['shrink-0 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold transition', 'border-teal-600 text-teal-700' => $activeTab === $tab, 'border-transparent text-slate-600 hover:text-teal-700' => $activeTab !== $tab])>
                         {{ $this->t($label) }}
@@ -837,6 +859,57 @@ new class extends Component
                 </div>
 
             </section>
+        @elseif ($activeTab === 'tasks')
+            <section>
+                <h1 class="mb-5 text-2xl font-bold text-slate-900">{{ $this->t('tasks') }}</h1>
+                @if ($this->canDo(\App\Enums\Role::ASSIGN_ORDER))
+                    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <h2 class="text-lg font-bold">{{ $this->t('assignments') }}</h2>
+                        <div class="mt-4 grid gap-3 md:grid-cols-2">
+                            @forelse ($this->ordersForAssignment as $order)
+                                <div wire:key="assignment-{{ $order->id }}" class="rounded-lg bg-slate-50 p-4">
+                                    <p class="font-semibold">{{ $order->order_number }}</p>
+                                    <p class="text-sm text-slate-500">{{ $order->machine?->name }} · {{ $order->product?->name }}</p>
+                                    <p class="mt-1 text-sm">{{ $this->t('status') }}: {{ $this->statusLabel($order->status) }}</p>
+                                    <label class="mt-3 block text-sm font-semibold">{{ $this->t('operator') }}
+                                        <select wire:change="assignOperator({{ $order->id }}, $event.target.value)" class="mt-1 w-full rounded-md border-slate-300">
+                                            <option value="">{{ $this->t('select_operator') }}</option>
+                                            @foreach ($this->operators as $operator)
+                                                <option value="{{ $operator->id }}" @selected($order->assigned_operator_id === $operator->id)>{{ $operator->name }}</option>
+                                            @endforeach
+                                        </select>
+                                    </label>
+                                </div>
+                            @empty
+                                <p class="text-sm text-slate-500 md:col-span-2">{{ $this->t('no_orders_to_assign') }}</p>
+                            @endforelse
+                        </div>
+                    </div>
+                @endif
+
+                @if ($this->canDo(\App\Enums\Role::CHECK_COLOR))
+                    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <h2 class="text-lg font-bold">{{ $this->t('my_assignments') }}</h2>
+                        <div class="mt-4 grid gap-3 md:grid-cols-2">
+                            @forelse ($this->ordersForMyTasks as $order)
+                                <div wire:key="my-assignment-{{ $order->id }}" class="rounded-lg bg-slate-50 p-4">
+                                    <p class="font-semibold">{{ $order->order_number }}</p>
+                                    <p class="text-sm text-slate-500">{{ $order->machine?->name }} · {{ $order->product?->name }}</p>
+                                    <p class="mt-2 text-sm">{{ $this->t('status') }}: {{ $this->statusLabel($order->status) }}</p>
+                                    <p class="mt-1 text-sm">{{ $this->t('current_quantity') }}: {{ $order->current_quantity }} / {{ $order->quantity }}</p>
+                                    @if ($order->status === 'in_progress' && ! $order->task_started_at)
+                                        <button wire:click="startAssignedTask({{ $order->id }})" class="mt-3 rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t('start_task') }}</button>
+                                    @elseif ($order->task_started_at)
+                                        <p class="mt-3 text-sm font-semibold text-blue-800">{{ $order->machine?->status === 'setup' ? $this->t('setup') : $this->t('task_in_progress') }}</p>
+                                    @endif
+                                </div>
+                            @empty
+                                <p class="text-sm text-slate-500 md:col-span-2">{{ $this->t('no_assignments') }}</p>
+                            @endforelse
+                        </div>
+                    </div>
+                @endif
+            </section>
         @elseif ($activeTab === 'orders')
             <section>
                 <h1 class="mb-5 text-2xl font-bold text-slate-900">{{ $this->t('orders') }}</h1>
@@ -863,47 +936,6 @@ new class extends Component
                     </div>
                 </div>
 
-                @if ($this->canDo(\App\Enums\Role::ASSIGN_ORDER))
-                    <div class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                        <h2 class="text-lg font-bold">{{ $this->t('assignments') }}</h2>
-                        <div class="mt-4 grid gap-3 md:grid-cols-2">
-                            @forelse ($this->ordersForAssignment as $order)
-                                <div wire:key="assignment-{{ $order->id }}" class="rounded-lg bg-slate-50 p-4">
-                                    <p class="font-semibold">{{ $order->order_number }}</p>
-                                    <p class="text-sm text-slate-500">{{ $order->machine?->name }} · {{ $order->product?->name }}</p>
-                                    <label class="mt-3 block text-sm font-semibold">{{ $this->t('operator') }}
-                                        <select wire:change="assignOperator({{ $order->id }}, $event.target.value)" class="mt-1 w-full rounded-md border-slate-300">
-                                            <option value="">{{ $this->t('select_operator') }}</option>
-                                            @foreach ($this->operators as $operator)
-                                                <option value="{{ $operator->id }}" @selected($order->assigned_operator_id === $operator->id)>{{ $operator->name }}</option>
-                                            @endforeach
-                                        </select>
-                                    </label>
-                                </div>
-                            @empty
-                                <p class="text-sm text-slate-500 md:col-span-2">{{ $this->t('no_orders_to_assign') }}</p>
-                            @endforelse
-                        </div>
-                    </div>
-                @endif
-
-                @if ($this->canDo(\App\Enums\Role::CHECK_COLOR))
-                    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                        <h2 class="text-lg font-bold">{{ $this->t('my_assignments') }}</h2>
-                        <div class="mt-4 grid gap-3 md:grid-cols-2">
-                            @forelse ($this->assignedOrders as $order)
-                                <div wire:key="my-assignment-{{ $order->id }}" class="rounded-lg bg-slate-50 p-4">
-                                    <p class="font-semibold">{{ $order->order_number }}</p>
-                                    <p class="text-sm text-slate-500">{{ $order->machine?->name }} · {{ $order->product?->name }}</p>
-                                    <p class="mt-2 text-sm">{{ $this->t('status') }}: {{ $this->statusLabel($order->status) }}</p>
-                                    <p class="mt-1 text-sm">{{ $this->t('current_quantity') }}: {{ $order->current_quantity }} / {{ $order->quantity }}</p>
-                                </div>
-                            @empty
-                                <p class="text-sm text-slate-500 md:col-span-2">{{ $this->t('no_assignments') }}</p>
-                            @endforelse
-                        </div>
-                    </div>
-                @endif
             </section>
         @elseif ($activeTab === 'moulds')
             <section>

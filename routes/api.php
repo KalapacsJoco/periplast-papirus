@@ -66,7 +66,7 @@ Route::get('/machines', function () {
 // Update machine status
 Route::post('/machines/{id}/status', function (Illuminate\Http\Request $request, $id) use ($pauseRunningOrders) {
     $validated = $request->validate([
-        'status' => 'required|in:active,stopped,warning,broken',
+        'status' => 'required|in:active,stopped,warning,broken,setup',
         'problem_description' => 'nullable|string',
     ]);
 

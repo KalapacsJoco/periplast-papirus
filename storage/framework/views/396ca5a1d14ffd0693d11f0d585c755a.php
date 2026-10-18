@@ -78,7 +78,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
         </div>
         <nav class="border-t border-slate-100" aria-label="Main">
             <div class="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-2 [scrollbar-width:none] sm:px-4">
-                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = ['machines' => 'machines', 'moulds' => 'moulds', 'products' => 'products', 'orders' => 'orders']; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $tab => $label): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = ['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'moulds' => 'moulds', 'products' => 'products']; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $tab => $label): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
                     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canViewTab($tab)): ?>
                     <button wire:click="selectTab('<?php echo e($tab); ?>')" class="<?php echo \Illuminate\Support\Arr::toCssClasses(['shrink-0 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold transition', 'border-teal-600 text-teal-700' => $activeTab === $tab, 'border-transparent text-slate-600 hover:text-teal-700' => $activeTab !== $tab]); ?>">
                         <?php echo e($this->t($label)); ?>
@@ -187,6 +187,58 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                 </div>
 
             </section>
+        <?php elseif($activeTab === 'tasks'): ?>
+            <section>
+                <h1 class="mb-5 text-2xl font-bold text-slate-900"><?php echo e($this->t('tasks')); ?></h1>
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canDo(\App\Enums\Role::ASSIGN_ORDER)): ?>
+                    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <h2 class="text-lg font-bold"><?php echo e($this->t('assignments')); ?></h2>
+                        <div class="mt-4 grid gap-3 md:grid-cols-2">
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->ordersForAssignment; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $order): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                                <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'assignment-'.e($order->id).''; ?>wire:key="assignment-<?php echo e($order->id); ?>" class="rounded-lg bg-slate-50 p-4">
+                                    <p class="font-semibold"><?php echo e($order->order_number); ?></p>
+                                    <p class="text-sm text-slate-500"><?php echo e($order->machine?->name); ?> · <?php echo e($order->product?->name); ?></p>
+                                    <p class="mt-1 text-sm"><?php echo e($this->t('status')); ?>: <?php echo e($this->statusLabel($order->status)); ?></p>
+                                    <label class="mt-3 block text-sm font-semibold"><?php echo e($this->t('operator')); ?>
+
+                                        <select wire:change="assignOperator(<?php echo e($order->id); ?>, $event.target.value)" class="mt-1 w-full rounded-md border-slate-300">
+                                            <option value=""><?php echo e($this->t('select_operator')); ?></option>
+                                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = $this->operators; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $operator): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                                                <option value="<?php echo e($operator->id); ?>" <?php if($order->assigned_operator_id === $operator->id): echo 'selected'; endif; ?>><?php echo e($operator->name); ?></option>
+                                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                                        </select>
+                                    </label>
+                                </div>
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                                <p class="text-sm text-slate-500 md:col-span-2"><?php echo e($this->t('no_orders_to_assign')); ?></p>
+                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                        </div>
+                    </div>
+                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canDo(\App\Enums\Role::CHECK_COLOR)): ?>
+                    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <h2 class="text-lg font-bold"><?php echo e($this->t('my_assignments')); ?></h2>
+                        <div class="mt-4 grid gap-3 md:grid-cols-2">
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->ordersForMyTasks; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $order): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                                <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'my-assignment-'.e($order->id).''; ?>wire:key="my-assignment-<?php echo e($order->id); ?>" class="rounded-lg bg-slate-50 p-4">
+                                    <p class="font-semibold"><?php echo e($order->order_number); ?></p>
+                                    <p class="text-sm text-slate-500"><?php echo e($order->machine?->name); ?> · <?php echo e($order->product?->name); ?></p>
+                                    <p class="mt-2 text-sm"><?php echo e($this->t('status')); ?>: <?php echo e($this->statusLabel($order->status)); ?></p>
+                                    <p class="mt-1 text-sm"><?php echo e($this->t('current_quantity')); ?>: <?php echo e($order->current_quantity); ?> / <?php echo e($order->quantity); ?></p>
+                                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($order->status === 'in_progress' && ! $order->task_started_at): ?>
+                                        <button wire:click="startAssignedTask(<?php echo e($order->id); ?>)" class="mt-3 rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800"><?php echo e($this->t('start_task')); ?></button>
+                                    <?php elseif($order->task_started_at): ?>
+                                        <p class="mt-3 text-sm font-semibold text-blue-800"><?php echo e($order->machine?->status === 'setup' ? $this->t('setup') : $this->t('task_in_progress')); ?></p>
+                                    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                                </div>
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                                <p class="text-sm text-slate-500 md:col-span-2"><?php echo e($this->t('no_assignments')); ?></p>
+                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                        </div>
+                    </div>
+                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+            </section>
         <?php elseif($activeTab === 'orders'): ?>
             <section>
                 <h1 class="mb-5 text-2xl font-bold text-slate-900"><?php echo e($this->t('orders')); ?></h1>
@@ -213,48 +265,6 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                     </div>
                 </div>
 
-                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canDo(\App\Enums\Role::ASSIGN_ORDER)): ?>
-                    <div class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                        <h2 class="text-lg font-bold"><?php echo e($this->t('assignments')); ?></h2>
-                        <div class="mt-4 grid gap-3 md:grid-cols-2">
-                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->ordersForAssignment; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $order): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
-                                <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'assignment-'.e($order->id).''; ?>wire:key="assignment-<?php echo e($order->id); ?>" class="rounded-lg bg-slate-50 p-4">
-                                    <p class="font-semibold"><?php echo e($order->order_number); ?></p>
-                                    <p class="text-sm text-slate-500"><?php echo e($order->machine?->name); ?> · <?php echo e($order->product?->name); ?></p>
-                                    <label class="mt-3 block text-sm font-semibold"><?php echo e($this->t('operator')); ?>
-
-                                        <select wire:change="assignOperator(<?php echo e($order->id); ?>, $event.target.value)" class="mt-1 w-full rounded-md border-slate-300">
-                                            <option value=""><?php echo e($this->t('select_operator')); ?></option>
-                                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = $this->operators; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $operator): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
-                                                <option value="<?php echo e($operator->id); ?>" <?php if($order->assigned_operator_id === $operator->id): echo 'selected'; endif; ?>><?php echo e($operator->name); ?></option>
-                                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
-                                        </select>
-                                    </label>
-                                </div>
-                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
-                                <p class="text-sm text-slate-500 md:col-span-2"><?php echo e($this->t('no_orders_to_assign')); ?></p>
-                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
-                        </div>
-                    </div>
-                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
-
-                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canDo(\App\Enums\Role::CHECK_COLOR)): ?>
-                    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                        <h2 class="text-lg font-bold"><?php echo e($this->t('my_assignments')); ?></h2>
-                        <div class="mt-4 grid gap-3 md:grid-cols-2">
-                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->assignedOrders; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $order): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
-                                <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'my-assignment-'.e($order->id).''; ?>wire:key="my-assignment-<?php echo e($order->id); ?>" class="rounded-lg bg-slate-50 p-4">
-                                    <p class="font-semibold"><?php echo e($order->order_number); ?></p>
-                                    <p class="text-sm text-slate-500"><?php echo e($order->machine?->name); ?> · <?php echo e($order->product?->name); ?></p>
-                                    <p class="mt-2 text-sm"><?php echo e($this->t('status')); ?>: <?php echo e($this->statusLabel($order->status)); ?></p>
-                                    <p class="mt-1 text-sm"><?php echo e($this->t('current_quantity')); ?>: <?php echo e($order->current_quantity); ?> / <?php echo e($order->quantity); ?></p>
-                                </div>
-                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
-                                <p class="text-sm text-slate-500 md:col-span-2"><?php echo e($this->t('no_assignments')); ?></p>
-                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
-                        </div>
-                    </div>
-                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
             </section>
         <?php elseif($activeTab === 'moulds'): ?>
             <section>
