@@ -89,6 +89,42 @@ class ExampleTest extends TestCase
             ->assertSee('Gép státuszának módosítása');
     }
 
+    public function test_machine_state_distinguishes_idle_stopped_and_setup_machines(): void
+    {
+        $user = User::factory()->create(['role' => Role::Operator]);
+        $idle = Machine::factory()->create(['status' => 'active']);
+        $running = Machine::factory()->create(['status' => 'active']);
+        $stoppedByStatus = Machine::factory()->create(['status' => 'stopped']);
+        $stoppedByMould = Machine::factory()->create(['status' => 'active']);
+        $stoppedByQuality = Machine::factory()->create(['status' => 'active']);
+        $setup = Machine::factory()->create(['status' => 'setup']);
+
+        Order::factory()->create(['machine_id' => $running->id, 'status' => 'in_progress', 'mould_id' => Mould::factory()->create(['status' => 'active'])->id, 'production_protocol' => null]);
+        Order::factory()->create([
+            'machine_id' => $stoppedByMould->id,
+            'status' => 'paused',
+            'mould_id' => Mould::factory()->create(['status' => 'needs_repair'])->id,
+        ]);
+        Order::factory()->create([
+            'machine_id' => $stoppedByQuality->id,
+            'status' => 'paused',
+            'production_protocol' => ['quality_status' => 'quality_issue'],
+        ]);
+
+        $dashboard = Livewire::actingAs($user)->test('production-dashboard');
+        $component = $dashboard->instance();
+        $machines = $component->machines->keyBy('id');
+
+        $this->assertSame('idle', $component->machineState($machines[$idle->id]));
+        $this->assertSame('running', $component->machineState($machines[$running->id]));
+        $this->assertSame('stopped', $component->machineState($machines[$stoppedByStatus->id]));
+        $this->assertSame('stopped', $component->machineState($machines[$stoppedByMould->id]));
+        $this->assertSame('stopped', $component->machineState($machines[$stoppedByQuality->id]));
+        $this->assertSame('setup', $component->machineState($machines[$setup->id]));
+
+        $dashboard->assertSeeHtml('border-l-blue-500')->assertSeeHtml('border-l-red-500')->assertSeeHtml('border-l-slate-300');
+    }
+
     public function test_production_time_calculator_loads_product_data_and_computes_duration(): void
     {
         $user = User::factory()->create(['role' => Role::Operator]);

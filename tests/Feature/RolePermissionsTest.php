@@ -351,6 +351,7 @@ class RolePermissionsTest extends TestCase
                     ->call('openMachineModal', $machine->id)
                     ->set('status', $status)
                     ->set('problemDescription', $status === 'active' ? '' : 'Reason: '.$status)
+                    ->set('resolutionDescription', 'Elhárítva')
                     ->call('saveMachineStatus')
                     ->assertHasNoErrors();
 
@@ -363,7 +364,7 @@ class RolePermissionsTest extends TestCase
     {
         $user = User::factory()->create(['role' => Role::Operator]);
         $machine = Machine::factory()->create(['status' => 'active']);
-        $mould = \App\Models\Mould::factory()->create(['status' => 'warning', 'problem_description' => 'Kidobó csap kopott']);
+        $mould = Mould::factory()->create(['status' => 'warning', 'problem_description' => 'Kidobó csap kopott']);
         Order::factory()->create(['machine_id' => $machine->id, 'mould_id' => $mould->id, 'status' => 'in_progress']);
 
         Livewire::actingAs($user)
@@ -390,6 +391,32 @@ class RolePermissionsTest extends TestCase
             ->assertSee('Hidraulika olajszint alacsony');
 
         $this->assertSame('Hidraulika olajszint alacsony', $machine->fresh()->problem_description);
+    }
+
+    public function test_restarting_a_stopped_machine_requires_a_resolution_and_logs_both_texts(): void
+    {
+        $user = User::factory()->create(['role' => Role::Operator]);
+        $machine = Machine::factory()->create(['status' => 'active']);
+        $order = Order::factory()->create(['machine_id' => $machine->id, 'status' => 'in_progress']);
+
+        Livewire::actingAs($user)
+            ->test('production-dashboard')
+            ->call('openMachineModal', $machine->id)
+            ->set('status', 'stopped')
+            ->set('problemDescription', 'Olajszint alacsony')
+            ->call('saveMachineStatus')
+            ->call('openMachineModal', $machine->id)
+            ->set('status', 'active')
+            ->call('saveMachineStatus')
+            ->assertHasErrors(['resolutionDescription' => 'required'])
+            ->set('resolutionDescription', 'Olaj utántöltve')
+            ->call('saveMachineStatus')
+            ->assertHasNoErrors();
+
+        $notes = collect($order->fresh()->production_protocol['entries'])->pluck('note')->implode("\n");
+        $this->assertStringContainsString('Olajszint alacsony', $notes);
+        $this->assertStringContainsString('Olaj utántöltve', $notes);
+        $this->assertSame('active', $machine->fresh()->status);
     }
 
     public function test_machine_card_displays_the_saved_machine_status(): void

@@ -76,6 +76,8 @@ new class extends Component
 
     public string $qualityProblemNote = '';
 
+    public string $resolutionDescription = '';
+
     public string $protocolEntryType = 'note';
 
     public string $protocolEntryNote = '';
@@ -233,11 +235,37 @@ new class extends Component
             && ($order->mould?->status === 'warning' || $this->qualityStatus($order) === 'warning');
     }
 
+    /** Returns stopped, setup, idle, warning or running. */
+    public function machineState(Machine $machine): string
+    {
+        $order = $machine->productionMetrics()->currentOrder();
+
+        if (
+            in_array($machine->status, ['stopped', 'broken'], true)
+            || ($order !== null && (
+                in_array($order->mould?->status, ['needs_repair', 'under_repair'], true)
+                || $this->qualityStatus($order) === 'quality_issue'
+            ))
+        ) {
+            return 'stopped';
+        }
+
+        if ($machine->status === 'setup') {
+            return 'setup';
+        }
+
+        if ($order === null) {
+            return 'idle';
+        }
+
+        return $this->machineHasWarning($machine) ? 'warning' : 'running';
+    }
+
     public function machineMatchesFilter(Machine $machine, string $filter): bool
     {
         return match ($filter) {
-            'active' => $machine->status === 'active',
-            'stopped' => $machine->status === 'stopped',
+            'active' => $machine->status === 'active' && in_array($this->machineState($machine), ['running', 'warning'], true),
+            'stopped', 'setup', 'idle' => $this->machineState($machine) === $filter,
             'warning' => $this->machineHasWarning($machine),
             default => true,
         };
@@ -245,7 +273,7 @@ new class extends Component
 
     public function filterMachines(string $filter): void
     {
-        $this->machineFilter = in_array($filter, ['active', 'stopped', 'warning'], true) && $this->machineFilter !== $filter ? $filter : 'all';
+        $this->machineFilter = in_array($filter, ['active', 'stopped', 'warning', 'setup', 'idle'], true) && $this->machineFilter !== $filter ? $filter : 'all';
     }
 
     #[Computed]
@@ -411,8 +439,38 @@ new class extends Component
         $this->detailMachineId = null;
     }
 
+    /** True when the open modal would restart equipment or production that was stopped by a fault. */
+    public function requiresResolution(): bool
+    {
+        if ($this->showMachineModal && $this->machineId) {
+            $current = Machine::find($this->machineId)?->status;
+
+            return in_array($current, ['stopped', 'broken'], true) && $this->status === 'active';
+        }
+
+        if ($this->showMouldModal && $this->mouldId) {
+            $current = Mould::find($this->mouldId)?->status;
+
+            return in_array($current, ['needs_repair', 'under_repair'], true) && in_array($this->status, ['active', 'standby', 'warning'], true);
+        }
+
+        if ($this->showQualityModal && $this->qualityOrderId) {
+            $order = Order::find($this->qualityOrderId);
+
+            return $order !== null && $this->qualityStatus($order) === 'quality_issue' && $this->qualityStatus !== 'quality_issue';
+        }
+
+        return false;
+    }
+
+    private function resolutionNote(): string
+    {
+        return $this->t('resolution_note', ['text' => $this->resolutionDescription]);
+    }
+
     public function openMachineModal(int $machineId): void
     {
+        $this->resolutionDescription = '';
         $this->ensurePermission(Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING);
         $machine = Machine::findOrFail($machineId);
         $this->machineId = $machine->id;
@@ -425,21 +483,22 @@ new class extends Component
     public function saveMachineStatus(): void
     {
         $this->ensureAuthenticated();
+        match ($this->status) {
+            'active' => $this->ensurePermission(Role::START_MACHINE),
+            'stopped' => $this->ensurePermission(Role::STOP_MACHINE),
+            'warning' => $this->ensurePermission(Role::REPORT_EQUIPMENT_WARNING),
+            default => null,
+        };
         $validated = $this->validate([
             'status' => ['required', Rule::in(['active', 'stopped', 'warning', 'broken'])],
             'problemDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf(in_array($this->status, ['warning', 'broken', 'stopped'], true))],
+            'resolutionDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->requiresResolution())],
         ]);
 
-        if ($validated['status'] === 'active') {
-            $this->ensurePermission(Role::START_MACHINE);
-        } elseif ($validated['status'] === 'stopped') {
-            $this->ensurePermission(Role::STOP_MACHINE);
-        } elseif ($validated['status'] === 'warning') {
-            $this->ensurePermission(Role::REPORT_EQUIPMENT_WARNING);
-        } else {
+        if ($validated['status'] === 'broken') {
             abort_unless($this->isAdmin(), 403);
         }
-
+        $resolved = $this->requiresResolution();
         $machine = Machine::findOrFail($this->machineId);
         $machine->update([
             'status' => $validated['status'],
@@ -457,7 +516,8 @@ new class extends Component
                 $order->current_quantity,
                 'machine_status',
                 $this->t('machine_status_note', ['status' => $this->statusLabel($validated['status'])])
-                    .(filled($validated['problemDescription'] ?? null) ? ': '.$validated['problemDescription'] : '')
+                    .(in_array($validated['status'], ['warning', 'broken', 'stopped'], true) && filled($validated['problemDescription'] ?? null) ? ': '.$validated['problemDescription'] : '')
+                    .($resolved ? ' — '.$this->resolutionNote() : '')
             ));
 
         if ($validated['status'] === 'broken') {
@@ -471,6 +531,7 @@ new class extends Component
 
     public function openMouldModal(int $mouldId): void
     {
+        $this->resolutionDescription = '';
         $this->ensurePermission(Role::REPORT_EQUIPMENT_WARNING);
         $mould = Mould::findOrFail($mouldId);
         $this->mouldId = $mould->id;
@@ -486,6 +547,7 @@ new class extends Component
         $validated = $this->validate([
             'status' => ['required', Rule::in(['active', 'standby', 'warning', 'needs_repair', 'under_repair'])],
             'problemDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf(in_array($this->status, ['warning', 'needs_repair'], true))],
+            'resolutionDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->requiresResolution())],
         ]);
 
         if (in_array($validated['status'], ['active', 'warning', 'needs_repair'], true)) {
@@ -494,6 +556,7 @@ new class extends Component
             abort_unless($this->isAdmin(), 403);
         }
 
+        $resolved = $this->requiresResolution();
         $mould = Mould::findOrFail($this->mouldId);
         $mould->update([
             'status' => $validated['status'],
@@ -511,7 +574,8 @@ new class extends Component
                 $order->current_quantity,
                 'mould_status',
                 $this->t('mould_status_note', ['status' => $this->statusLabel($validated['status'])])
-                    .(filled($validated['problemDescription'] ?? null) ? ': '.$validated['problemDescription'] : '')
+                    .(in_array($validated['status'], ['warning', 'needs_repair'], true) && filled($validated['problemDescription'] ?? null) ? ': '.$validated['problemDescription'] : '')
+                    .($resolved ? ' — '.$this->resolutionNote() : '')
             ));
 
         if ($validated['status'] === 'needs_repair') {
@@ -620,6 +684,7 @@ new class extends Component
             ? 'color_issue'
             : 'surface_defect';
         $this->qualityProblemNote = '';
+        $this->resolutionDescription = '';
         $this->quantityWarning = '';
         $this->resetValidation();
         $this->showQualityModal = true;
@@ -634,7 +699,9 @@ new class extends Component
             'currentQuantity' => ['required', 'integer', 'min:0'],
             'qualityProblemType' => ['required_unless:qualityStatus,good', 'nullable', Rule::in($isColorCheck ? ['color_issue'] : ['surface_defect', 'dimension_issue', 'color_issue', 'material_issue', 'burn_mark', 'flash', 'short_shot', 'contamination', 'other'])],
             'qualityProblemNote' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->qualityStatus !== 'good')],
+            'resolutionDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->requiresResolution())],
         ]);
+        $resolved = $this->requiresResolution();
 
         $order = Order::findOrFail($this->qualityOrderId);
         $quantity = min($validated['currentQuantity'], $order->quantity);
@@ -689,7 +756,9 @@ new class extends Component
             $order->refresh(),
             $quantity,
             'quality_check',
-            $this->t('quality_check_note', ['status' => $this->statusLabel($validated['qualityStatus'])]),
+            $this->t('quality_check_note', ['status' => $this->statusLabel($validated['qualityStatus'])])
+                .($validated['qualityStatus'] !== 'good' && filled($validated['qualityProblemNote'] ?? null) ? ': '.$validated['qualityProblemNote'] : '')
+                .($resolved ? ' — '.$this->resolutionNote() : ''),
             ['quality_status' => $validated['qualityStatus']]
         );
 
@@ -1058,6 +1127,8 @@ new class extends Component
                         <option value="active">{{ $this->t('active_machines') }}</option>
                         <option value="warning">{{ $this->t('warning_machines') }}</option>
                         <option value="stopped">{{ $this->t('stopped_machines') }}</option>
+                        <option value="setup">{{ $this->t('setup_machines') }}</option>
+                        <option value="idle">{{ $this->t('idle_machines') }}</option>
                     </select>
                 </div>
 
@@ -1074,14 +1145,15 @@ new class extends Component
                             @php($metrics = $machine->productionMetrics())
                             @php($order = $metrics->currentOrder())
                             @php($nextOrder = $metrics->nextActivatedOrder())
-                            @php($tone = $machine->status === 'stopped' ? 'red' : ($this->machineHasWarning($machine) ? 'amber' : ($machine->status === 'active' ? 'emerald' : 'slate')))
+                            @php($state = $this->machineState($machine))
                             <tbody wire:key="machine-{{ $machine->id }}">
                                 <tr @class([
                                     'group cursor-pointer align-middle text-slate-800 transition-colors focus:outline-none [&>td:first-child]:border-l-4 [&>td]:transition-colors [&:hover>td]:border-teal-500 [&:hover>td]:bg-teal-100 [&:hover>td:first-child]:border-l-teal-600 [&:focus-visible>td]:border-teal-500 [&:focus-visible>td]:bg-teal-100',
-                                    '[&>td]:bg-emerald-50 [&>td]:border-emerald-200 [&>td:first-child]:border-l-emerald-500' => $tone === 'emerald',
-                                    '[&>td]:bg-amber-50 [&>td]:border-amber-200 [&>td:first-child]:border-l-amber-500' => $tone === 'amber',
-                                    '[&>td]:bg-red-50 [&>td]:border-red-200 [&>td:first-child]:border-l-red-500' => $tone === 'red',
-                                    '[&>td:first-child]:border-l-slate-400' => $tone === 'slate',
+                                    '[&>td]:bg-emerald-50 [&>td]:border-emerald-200 [&>td:first-child]:border-l-emerald-500' => $state === 'running',
+                                    '[&>td]:bg-amber-50 [&>td]:border-amber-200 [&>td:first-child]:border-l-amber-500' => $state === 'warning',
+                                    '[&>td]:bg-red-50 [&>td]:border-red-200 [&>td:first-child]:border-l-red-500' => $state === 'stopped',
+                                    '[&>td]:bg-blue-50 [&>td]:border-blue-200 [&>td:first-child]:border-l-blue-500' => $state === 'setup',
+                                    '[&>td:first-child]:border-l-slate-300' => $state === 'idle',
                                 ]) wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}">
                                     <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->name }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->type }}</td>
@@ -1131,7 +1203,15 @@ new class extends Component
                 <div class="grid gap-4 sm:grid-cols-2 xl:hidden">
                     @forelse ($this->machines->filter(fn ($machine) => $this->machineMatchesFilter($machine, $machineFilter)) as $machine)
                         @php($order = $machine->orders->first())
-                        <article wire:key="machine-card-{{ $machine->id }}" wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}" class="cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600">
+                        @php($state = $this->machineState($machine))
+                        <article wire:key="machine-card-{{ $machine->id }}" wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}" @class([
+                            'cursor-pointer overflow-hidden rounded-xl border shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600',
+                            'border-emerald-300 bg-emerald-50' => $state === 'running',
+                            'border-amber-300 bg-amber-50' => $state === 'warning',
+                            'border-red-300 bg-red-50' => $state === 'stopped',
+                            'border-blue-300 bg-blue-50' => $state === 'setup',
+                            'border-slate-200 bg-white' => $state === 'idle',
+                        ])>
                             <div class="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
                                 <div>
                                     <h2 class="text-lg font-bold text-slate-900">{{ $machine->name }}</h2>
@@ -1488,6 +1568,7 @@ new class extends Component
                 <div class="mt-5 space-y-4">
                     <label class="block text-sm font-semibold">{{ $this->t('new_status') }}<select wire:model.live="status" class="mt-1 w-full rounded-md border-slate-300">@if ($showMachineModal)<option value="" disabled>{{ $this->t('select_status') }}</option>@if ($this->canDo(\App\Enums\Role::START_MACHINE))<option value="active">{{ $this->t('active') }}</option>@endif @if ($this->canDo(\App\Enums\Role::STOP_MACHINE))<option value="stopped">{{ $this->t('stopped') }}</option>@endif @if ($this->canDo(\App\Enums\Role::REPORT_EQUIPMENT_WARNING))<option value="warning">{{ $this->t('warning') }}</option>@endif @if ($this->isAdmin())<option value="broken">{{ $this->t('broken') }}</option>@endif @else @if ($this->isAdmin())<option value="active">{{ $this->t('active') }}</option><option value="standby">{{ $this->t('standby') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="needs_repair">{{ $this->t('needs_repair') }}</option><option value="under_repair">{{ $this->t('under_repair') }}</option>@else<option value="" disabled>{{ $this->t('select_status') }}</option><option value="active">{{ $this->t('active') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="needs_repair">{{ $this->t('needs_repair') }}</option>@endif @endif</select></label>
                     @if (in_array($status, ['warning', 'broken', 'needs_repair', 'stopped'], true))<label class="block text-sm font-semibold">{{ $this->t('problem_description') }}<textarea wire:model="problemDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('problemDescription')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>@endif
+                    @if ($this->requiresResolution())<label class="block text-sm font-semibold">{{ $this->t('resolution_description') }}<textarea wire:model="resolutionDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('resolutionDescription')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>@endif
                 </div>
                 <div class="mt-6 flex justify-end gap-3"><button wire:click="$set('{{ $showMachineModal ? 'showMachineModal' : 'showMouldModal' }}', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="{{ $showMachineModal ? 'saveMachineStatus' : 'saveMouldStatus' }}" wire:loading.attr="disabled" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('save') }}</button></div>
             </div>
@@ -1609,7 +1690,7 @@ new class extends Component
     @endif
 
     @if ($showQualityModal)
-        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold">{{ $this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'record_color_check' : 'record_quality_check') }}</h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold">{{ $this->t('result') }}<select wire:model.live="qualityStatus" class="mt-1 w-full rounded-md border-slate-300"><option value="good">{{ $this->t('good') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="quality_issue">{{ $this->t('quality_issue') }}</option></select></label><label class="text-sm font-semibold">{{ $this->t('current_quantity') }}<input wire:model="currentQuantity" wire:input="$set('quantityWarning', '')" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@if($quantityWarning !== '')<div class="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert"><p class="font-semibold">{{ $quantityWarning }}</p><p class="mt-1">{{ $this->t('quantity_confirm_question') }}</p><div class="mt-3 flex gap-2"><button wire:click="saveQualityCheck(true)" class="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700">{{ $this->t('quantity_confirm_yes') }}</button><button wire:click="$set('quantityWarning', '')" class="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-bold text-amber-900">{{ $this->t('quantity_confirm_edit') }}</button></div></div>@endif@if($qualityStatus !== 'good')<div wire:key="quality-problem-fields-{{ $qualityStatus }}" class="grid gap-4"><label class="text-sm font-semibold">{{ $this->t('problem_type') }}<select wire:model="qualityProblemType" class="mt-1 w-full rounded-md border-slate-300">@if ($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY))<option value="color_issue">{{ $this->t('color_issue') }}</option>@else<option value="surface_defect">{{ $this->t('surface_defect') }}</option><option value="dimension_issue">{{ $this->t('dimension_issue') }}</option><option value="color_issue">{{ $this->t('color_issue') }}</option><option value="material_issue">{{ $this->t('material_issue') }}</option><option value="burn_mark">{{ $this->t('burn_mark') }}</option><option value="flash">{{ $this->t('flash') }}</option><option value="short_shot">{{ $this->t('short_shot') }}</option><option value="contamination">{{ $this->t('contamination') }}</option><option value="other">{{ $this->t('other') }}</option>@endif</select></label><label class="text-sm font-semibold">{{ $this->t('problem_reason') }}<textarea wire:model="qualityProblemNote" rows="3" placeholder="{{ $this->t('problem_reason_placeholder') }}" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('qualityProblemNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label></div>@endif</div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showQualityModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="saveQualityCheck" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('record') }}</button></div></div></div>
+        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold">{{ $this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'record_color_check' : 'record_quality_check') }}</h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold">{{ $this->t('result') }}<select wire:model.live="qualityStatus" class="mt-1 w-full rounded-md border-slate-300"><option value="good">{{ $this->t('good') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="quality_issue">{{ $this->t('quality_issue') }}</option></select></label><label class="text-sm font-semibold">{{ $this->t('current_quantity') }}<input wire:model="currentQuantity" wire:input="$set('quantityWarning', '')" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@if($quantityWarning !== '')<div class="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert"><p class="font-semibold">{{ $quantityWarning }}</p><p class="mt-1">{{ $this->t('quantity_confirm_question') }}</p><div class="mt-3 flex gap-2"><button wire:click="saveQualityCheck(true)" class="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700">{{ $this->t('quantity_confirm_yes') }}</button><button wire:click="$set('quantityWarning', '')" class="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-bold text-amber-900">{{ $this->t('quantity_confirm_edit') }}</button></div></div>@endif@if($qualityStatus !== 'good')<div wire:key="quality-problem-fields-{{ $qualityStatus }}" class="grid gap-4"><label class="text-sm font-semibold">{{ $this->t('problem_type') }}<select wire:model="qualityProblemType" class="mt-1 w-full rounded-md border-slate-300">@if ($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY))<option value="color_issue">{{ $this->t('color_issue') }}</option>@else<option value="surface_defect">{{ $this->t('surface_defect') }}</option><option value="dimension_issue">{{ $this->t('dimension_issue') }}</option><option value="color_issue">{{ $this->t('color_issue') }}</option><option value="material_issue">{{ $this->t('material_issue') }}</option><option value="burn_mark">{{ $this->t('burn_mark') }}</option><option value="flash">{{ $this->t('flash') }}</option><option value="short_shot">{{ $this->t('short_shot') }}</option><option value="contamination">{{ $this->t('contamination') }}</option><option value="other">{{ $this->t('other') }}</option>@endif</select></label><label class="text-sm font-semibold">{{ $this->t('problem_reason') }}<textarea wire:model="qualityProblemNote" rows="3" placeholder="{{ $this->t('problem_reason_placeholder') }}" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('qualityProblemNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label></div>@endif @if ($this->requiresResolution())<label class="text-sm font-semibold">{{ $this->t('resolution_description') }}<textarea wire:model="resolutionDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('resolutionDescription')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>@endif</div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showQualityModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="saveQualityCheck" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('record') }}</button></div></div></div>
     @endif
     @endguest
 </div>

@@ -114,6 +114,8 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                         <option value="active"><?php echo e($this->t('active_machines')); ?></option>
                         <option value="warning"><?php echo e($this->t('warning_machines')); ?></option>
                         <option value="stopped"><?php echo e($this->t('stopped_machines')); ?></option>
+                        <option value="setup"><?php echo e($this->t('setup_machines')); ?></option>
+                        <option value="idle"><?php echo e($this->t('idle_machines')); ?></option>
                     </select>
                 </div>
 
@@ -130,14 +132,15 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                             <?php ($metrics = $machine->productionMetrics()); ?>
                             <?php ($order = $metrics->currentOrder()); ?>
                             <?php ($nextOrder = $metrics->nextActivatedOrder()); ?>
-                            <?php ($tone = $machine->status === 'stopped' ? 'red' : ($this->machineHasWarning($machine) ? 'amber' : ($machine->status === 'active' ? 'emerald' : 'slate'))); ?>
+                            <?php ($state = $this->machineState($machine)); ?>
                             <tbody <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'machine-'.e($machine->id).''; ?>wire:key="machine-<?php echo e($machine->id); ?>">
                                 <tr class="<?php echo \Illuminate\Support\Arr::toCssClasses([
                                     'group cursor-pointer align-middle text-slate-800 transition-colors focus:outline-none [&>td:first-child]:border-l-4 [&>td]:transition-colors [&:hover>td]:border-teal-500 [&:hover>td]:bg-teal-100 [&:hover>td:first-child]:border-l-teal-600 [&:focus-visible>td]:border-teal-500 [&:focus-visible>td]:bg-teal-100',
-                                    '[&>td]:bg-emerald-50 [&>td]:border-emerald-200 [&>td:first-child]:border-l-emerald-500' => $tone === 'emerald',
-                                    '[&>td]:bg-amber-50 [&>td]:border-amber-200 [&>td:first-child]:border-l-amber-500' => $tone === 'amber',
-                                    '[&>td]:bg-red-50 [&>td]:border-red-200 [&>td:first-child]:border-l-red-500' => $tone === 'red',
-                                    '[&>td:first-child]:border-l-slate-400' => $tone === 'slate',
+                                    '[&>td]:bg-emerald-50 [&>td]:border-emerald-200 [&>td:first-child]:border-l-emerald-500' => $state === 'running',
+                                    '[&>td]:bg-amber-50 [&>td]:border-amber-200 [&>td:first-child]:border-l-amber-500' => $state === 'warning',
+                                    '[&>td]:bg-red-50 [&>td]:border-red-200 [&>td:first-child]:border-l-red-500' => $state === 'stopped',
+                                    '[&>td]:bg-blue-50 [&>td]:border-blue-200 [&>td:first-child]:border-l-blue-500' => $state === 'setup',
+                                    '[&>td:first-child]:border-l-slate-300' => $state === 'idle',
                                 ]); ?>" wire:click="openMachineDetail(<?php echo e($machine->id); ?>)" wire:keydown.enter="openMachineDetail(<?php echo e($machine->id); ?>)" role="button" tabindex="0" title="<?php echo e($this->t('open_details')); ?>">
                                     <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($machine->name); ?></td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($machine->type); ?></td>
@@ -187,7 +190,15 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                 <div class="grid gap-4 sm:grid-cols-2 xl:hidden">
                     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->machines->filter(fn ($machine) => $this->machineMatchesFilter($machine, $machineFilter)); $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $machine): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
                         <?php ($order = $machine->orders->first()); ?>
-                        <article <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'machine-card-'.e($machine->id).''; ?>wire:key="machine-card-<?php echo e($machine->id); ?>" wire:click="openMachineDetail(<?php echo e($machine->id); ?>)" wire:keydown.enter="openMachineDetail(<?php echo e($machine->id); ?>)" role="button" tabindex="0" title="<?php echo e($this->t('open_details')); ?>" class="cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600">
+                        <?php ($state = $this->machineState($machine)); ?>
+                        <article <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'machine-card-'.e($machine->id).''; ?>wire:key="machine-card-<?php echo e($machine->id); ?>" wire:click="openMachineDetail(<?php echo e($machine->id); ?>)" wire:keydown.enter="openMachineDetail(<?php echo e($machine->id); ?>)" role="button" tabindex="0" title="<?php echo e($this->t('open_details')); ?>" class="<?php echo \Illuminate\Support\Arr::toCssClasses([
+                            'cursor-pointer overflow-hidden rounded-xl border shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600',
+                            'border-emerald-300 bg-emerald-50' => $state === 'running',
+                            'border-amber-300 bg-amber-50' => $state === 'warning',
+                            'border-red-300 bg-red-50' => $state === 'stopped',
+                            'border-blue-300 bg-blue-50' => $state === 'setup',
+                            'border-slate-200 bg-white' => $state === 'idle',
+                        ]); ?>">
                             <div class="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
                                 <div>
                                     <h2 class="text-lg font-bold text-slate-900"><?php echo e($machine->name); ?></h2>
@@ -556,6 +567,14 @@ $message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600">
 if (isset($__messageOriginal)) { $message = $__messageOriginal; }
 endif;
 unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></label><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->requiresResolution()): ?><label class="block text-sm font-semibold"><?php echo e($this->t('resolution_description')); ?><textarea wire:model="resolutionDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__errorArgs = ['resolutionDescription'];
+$__bag = $errors->getBag($__errorArgs[1] ?? 'default');
+if ($__bag->has($__errorArgs[0])) :
+if (isset($message)) { $__messageOriginal = $message; }
+$message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600"><?php echo e($message); ?></span><?php unset($message);
+if (isset($__messageOriginal)) { $message = $__messageOriginal; }
+endif;
+unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></label><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                 </div>
                 <div class="mt-6 flex justify-end gap-3"><button wire:click="$set('<?php echo e($showMachineModal ? 'showMachineModal' : 'showMouldModal'); ?>', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600"><?php echo e($this->t('cancel')); ?></button><button wire:click="<?php echo e($showMachineModal ? 'saveMachineStatus' : 'saveMouldStatus'); ?>" wire:loading.attr="disabled" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white"><?php echo e($this->t('save')); ?></button></div>
             </div>
@@ -696,7 +715,14 @@ if (isset($message)) { $__messageOriginal = $message; }
 $message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600"><?php echo e($message); ?></span><?php unset($message);
 if (isset($__messageOriginal)) { $message = $__messageOriginal; }
 endif;
-unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></label></div><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showQualityModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600"><?php echo e($this->t('cancel')); ?></button><button wire:click="saveQualityCheck" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white"><?php echo e($this->t('record')); ?></button></div></div></div>
+unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></label></div><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?> <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->requiresResolution()): ?><label class="text-sm font-semibold"><?php echo e($this->t('resolution_description')); ?><textarea wire:model="resolutionDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__errorArgs = ['resolutionDescription'];
+$__bag = $errors->getBag($__errorArgs[1] ?? 'default');
+if ($__bag->has($__errorArgs[0])) :
+if (isset($message)) { $__messageOriginal = $message; }
+$message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600"><?php echo e($message); ?></span><?php unset($message);
+if (isset($__messageOriginal)) { $message = $__messageOriginal; }
+endif;
+unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></label><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showQualityModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600"><?php echo e($this->t('cancel')); ?></button><button wire:click="saveQualityCheck" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white"><?php echo e($this->t('record')); ?></button></div></div></div>
     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
 </div><?php /**PATH C:\Users\kalap\Herd\Papirus\storage\framework\views/livewire/views/1a614361.blade.php ENDPATH**/ ?>
