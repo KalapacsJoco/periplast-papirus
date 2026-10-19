@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Enums\Role;
 use App\Models\Machine;
+use App\Models\Mould;
 use App\Models\Order;
+use App\Models\Product;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -25,16 +27,17 @@ class ExampleTest extends TestCase
         $response->assertStatus(200);
     }
 
-    public function test_machine_status_cards_count_and_filter_machines_including_mould_and_product_warnings(): void
+    public function test_machine_status_filter_includes_mould_and_product_warnings(): void
     {
         $user = User::factory()->create(['role' => Role::Operator]);
         $active = Machine::factory()->create(['name' => 'M-ACTIVE', 'status' => 'active']);
         Machine::factory()->create(['name' => 'M-STOPPED', 'status' => 'stopped']);
         Machine::factory()->create(['name' => 'M-WARN', 'status' => 'warning']);
-        $mould = \App\Models\Mould::factory()->create(['status' => 'warning']);
+        $mould = Mould::factory()->create(['status' => 'warning']);
         Order::factory()->create(['machine_id' => $active->id, 'mould_id' => $mould->id, 'status' => 'in_progress']);
 
         Livewire::actingAs($user)->test('production-dashboard')
+            ->assertSeeHtml('wire:model.live="machineFilter"')
             ->assertSee('Aktív gépek')
             ->call('filterMachines', 'warning')
             ->assertSee('M-WARN')
@@ -47,11 +50,50 @@ class ExampleTest extends TestCase
             ->assertSet('machineFilter', 'all');
     }
 
+    public function test_machine_table_shows_the_requested_columns_and_opens_machine_details_on_click(): void
+    {
+        $user = User::factory()->create(['role' => Role::Operator]);
+        $machine = Machine::factory()->create(['name' => 'M-TABLE-01']);
+        $order = Order::factory()->create([
+            'machine_id' => $machine->id,
+            'status' => 'in_progress',
+            'order_number' => 'ORD-TABLE-01',
+        ]);
+
+        Livewire::actingAs($user)->test('production-dashboard')
+            ->assertSee('Gép száma')
+            ->assertSee('Éppen futó termék')
+            ->assertSee('Tegnapi darabszám azonos időben')
+            ->assertSee('Napi festékfogyasztás')
+            ->assertSee('M-TABLE-01')
+            ->assertSee('aria-label="Minőségellenőrzés szükséges"', false)
+            ->call('openMachineDetail', $machine->id)
+            ->assertSee('ORD-TABLE-01')
+            ->assertSee('Minőség:');
+    }
+
+    public function test_machine_detail_offers_mould_and_quality_actions_for_an_activated_order(): void
+    {
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $machine = Machine::factory()->create();
+        Order::factory()->create([
+            'machine_id' => $machine->id,
+            'status' => 'in_progress',
+            'activated_at' => now(),
+            'task_started_at' => null,
+        ]);
+
+        Livewire::actingAs($admin)->test('production-dashboard')
+            ->call('openMachineDetail', $machine->id)
+            ->assertSee('Szerszám státuszának módosítása')
+            ->assertSee('Gép státuszának módosítása');
+    }
+
     public function test_production_time_calculator_loads_product_data_and_computes_duration(): void
     {
         $user = User::factory()->create(['role' => Role::Operator]);
-        $mould = \App\Models\Mould::factory()->create(['cavity_count' => 4]);
-        $product = \App\Models\Product::factory()->create(['planned_cycle_time' => 30000]);
+        $mould = Mould::factory()->create(['cavity_count' => 4]);
+        $product = Product::factory()->create(['planned_cycle_time' => 30000]);
         $product->moulds()->attach($mould);
 
         Livewire::actingAs($user)->test('production-dashboard')
@@ -108,6 +150,7 @@ class ExampleTest extends TestCase
             ->set('qualityProblemType', 'surface_defect')
             ->set('qualityProblemNote', 'Enyhe felületi eltérés.')
             ->call('saveQualityCheck')
+            ->call('openMachineDetail', $order->machine_id)
             ->call('openProductionProtocol', $order->id)
             ->assertSee('Minőség: Figyelmeztetés')
             ->assertSee('bg-amber-100')
@@ -132,6 +175,7 @@ class ExampleTest extends TestCase
             ]);
 
             Livewire::actingAs($qualityManager)->test('production-dashboard')
+                ->call('openMachineDetail', $order->machine_id)
                 ->assertSee('Még nem történt minőségellenőrzés')
                 ->assertSee('Minőségellenőrzés szükséges')
                 ->call('openQualityModal', $order->id)
@@ -162,7 +206,7 @@ class ExampleTest extends TestCase
 
         try {
             $qualityManager = User::factory()->create(['role' => Role::QualityManager]);
-            Order::factory()->create([
+            $order = Order::factory()->create([
                 'status' => 'in_progress',
                 'production_protocol' => [
                     'last_quality_check_at' => now()->subHours(3)->subSecond()->toIso8601String(),
@@ -170,6 +214,7 @@ class ExampleTest extends TestCase
             ]);
 
             Livewire::actingAs($qualityManager)->test('production-dashboard')
+                ->call('openMachineDetail', $order->machine_id)
                 ->assertSee('Utolsó minőségellenőrzés:')
                 ->assertSee('Minőségellenőrzés szükséges');
         } finally {

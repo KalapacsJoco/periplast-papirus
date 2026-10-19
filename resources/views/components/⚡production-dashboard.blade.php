@@ -209,9 +209,14 @@ new class extends Component
     {
         return Machine::query()
             ->with(['orders' => fn ($query) => $query
-                ->whereIn('status', ['in_progress', 'paused'])
+                ->where(function ($query): void {
+                    $query
+                        ->whereIn('status', ['waiting', 'in_progress', 'paused', 'interrupted'])
+                        ->orWhere('ended_at', '>=', now()->subDay());
+                })
                 ->with(['mould:id,name,number,cavity_count,status,problem_description', 'product:id,name,code,planned_cycle_time'])
-                ->orderByDesc('started_at')])
+                ->orderBy('date')
+                ->orderBy('id')])
             ->orderBy('name')
             ->get();
     }
@@ -222,7 +227,7 @@ new class extends Component
             return true;
         }
 
-        $order = $machine->orders->first();
+        $order = $machine->productionMetrics()->currentOrder();
 
         return $order !== null
             && ($order->mould?->status === 'warning' || $this->qualityStatus($order) === 'warning');
@@ -236,11 +241,6 @@ new class extends Component
             'warning' => $this->machineHasWarning($machine),
             default => true,
         };
-    }
-
-    public function machineCount(string $filter): int
-    {
-        return $this->machines->filter(fn (Machine $machine) => $this->machineMatchesFilter($machine, $filter))->count();
     }
 
     public function filterMachines(string $filter): void
@@ -388,9 +388,14 @@ new class extends Component
             ->with([
                 'moulds:id,name,number',
                 'orders' => fn ($query) => $query
-                    ->whereIn('status', ['in_progress', 'paused'])
-                    ->with(['mould', 'product'])
-                    ->orderByDesc('started_at'),
+                    ->where(function ($query): void {
+                        $query
+                            ->whereIn('status', ['waiting', 'in_progress', 'paused', 'interrupted'])
+                            ->orWhere('ended_at', '>=', now()->subDay());
+                    })
+                    ->with(['mould', 'product.material', 'product.color', 'product.additives'])
+                    ->orderBy('date')
+                    ->orderBy('id'),
             ])
             ->find($this->detailMachineId);
     }
@@ -1033,7 +1038,10 @@ new class extends Component
         </nav>
     </header>
 
-    <main class="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6">
+    <main @class([
+        'mx-auto w-full max-w-none px-3 py-5 sm:px-5 sm:py-6' => $activeTab === 'machines',
+        'mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-6' => $activeTab !== 'machines',
+    ])>
         @if ($flashMessage)
             <div class="mb-5 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">
                 {{ $flashMessage }}
@@ -1043,40 +1051,94 @@ new class extends Component
 
         @if ($activeTab === 'machines')
             <section wire:poll.60s>
-                <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                        <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('machines') }}</h1>
-                        <p class="mt-1 text-sm text-slate-600">{{ $this->t('dashboard_subtitle') }}</p>
-                    </div>
-                    <span class="rounded-full bg-teal-100 px-3 py-1 text-sm font-semibold text-teal-800">{{ $this->t('machine_count', ['count' => $this->machineCount('all')]) }}</span>
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('machines') }}</h1>
+                    <select wire:model.live="machineFilter" aria-label="{{ $this->t('machine_status_label') }}" class="rounded-md border-slate-300 bg-white px-3 py-2 text-sm">
+                        <option value="all">{{ $this->t('all_machines') }}</option>
+                        <option value="active">{{ $this->t('active_machines') }}</option>
+                        <option value="warning">{{ $this->t('warning_machines') }}</option>
+                        <option value="stopped">{{ $this->t('stopped_machines') }}</option>
+                    </select>
                 </div>
 
-                <div class="mb-5 grid grid-cols-3 gap-3">
-                    @foreach (['active' => ['emerald', 'active'], 'warning' => ['amber', 'warning'], 'stopped' => ['red', 'stopped']] as $filter => [$color, $label])
-                        <button type="button" wire:click="filterMachines('{{ $filter }}')" aria-pressed="{{ $machineFilter === $filter ? 'true' : 'false' }}" @class([
-                            'rounded-xl border-2 bg-white p-3 text-left shadow-sm transition sm:p-4',
-                            'border-emerald-500 ring-2 ring-emerald-200' => $machineFilter === $filter && $color === 'emerald',
-                            'border-amber-500 ring-2 ring-amber-200' => $machineFilter === $filter && $color === 'amber',
-                            'border-red-500 ring-2 ring-red-200' => $machineFilter === $filter && $color === 'red',
-                            'border-slate-200 hover:border-slate-400' => $machineFilter !== $filter,
-                        ])>
-                            <span @class(['block text-2xl font-bold sm:text-3xl', 'text-emerald-700' => $color === 'emerald', 'text-amber-600' => $color === 'amber', 'text-red-600' => $color === 'red'])>{{ $this->machineCount($filter) }}</span>
-                            <span class="block text-xs font-semibold text-slate-600 sm:text-sm">{{ $this->t($label.'_machines') }}</span>
-                        </button>
-                    @endforeach
+                <div class="hidden xl:block">
+                    <table class="w-full table-auto border-separate border-spacing-y-1.5 text-left text-[11px] leading-tight [&_td]:break-words [&_td]:px-1.5 [&_th]:px-1.5 [&_th]:align-bottom [&_th]:text-[10px]">
+                        <thead class="text-slate-700">
+                            <tr>
+                                @foreach (['machine_number', 'type', 'running_product', 'gross_weight', 'net_weight', 'order_number', 'product_code', 'required_quantity', 'current_quantity', 'yesterday_quantity_same_time', 'cavity_count', 'actual_cycle_time', 'database_cycle_time', 'utilization_last_24_hours', 'theoretical_daily_production', 'actual_production_last_24_hours', 'color_percentage', 'daily_color_consumption', 'next_activated_order', 'waiting_orders'] as $column)
+                                    <th @class(['bg-slate-200 py-2', 'rounded-l-md' => $loop->first, 'rounded-r-md' => $loop->last]) title="{{ $this->t($column) }}">{{ $this->t(in_array($column, ['type', 'gross_weight', 'net_weight'], true) ? $column : 'col_'.$column) }}</th>
+                                @endforeach
+                            </tr>
+                        </thead>
+                        @forelse ($this->machines->filter(fn ($machine) => $this->machineMatchesFilter($machine, $machineFilter)) as $machine)
+                            @php($metrics = $machine->productionMetrics())
+                            @php($order = $metrics->currentOrder())
+                            @php($nextOrder = $metrics->nextActivatedOrder())
+                            @php($tone = $machine->status === 'stopped' ? 'red' : ($this->machineHasWarning($machine) ? 'amber' : ($machine->status === 'active' ? 'emerald' : 'slate')))
+                            <tbody wire:key="machine-{{ $machine->id }}">
+                                <tr @class([
+                                    'group cursor-pointer align-middle text-slate-800 transition-colors focus:outline-none [&>td:first-child]:border-l-4 [&>td]:transition-colors [&:hover>td]:border-teal-500 [&:hover>td]:bg-teal-100 [&:hover>td:first-child]:border-l-teal-600 [&:focus-visible>td]:border-teal-500 [&:focus-visible>td]:bg-teal-100',
+                                    '[&>td]:bg-emerald-50 [&>td]:border-emerald-200 [&>td:first-child]:border-l-emerald-500' => $tone === 'emerald',
+                                    '[&>td]:bg-amber-50 [&>td]:border-amber-200 [&>td:first-child]:border-l-amber-500' => $tone === 'amber',
+                                    '[&>td]:bg-red-50 [&>td]:border-red-200 [&>td:first-child]:border-l-red-500' => $tone === 'red',
+                                    '[&>td:first-child]:border-l-slate-400' => $tone === 'slate',
+                                ]) wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}">
+                                    <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->name }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->type }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order && $this->qualityCheckOverdue($order))<span class="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-black text-white" title="{{ $this->t('quality_check_overdue') }}" aria-label="{{ $this->t('quality_check_overdue') }}">!</span>@endif{{ $order?->product?->name ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->gross_weight ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->net_weight ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->order_number ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->product?->code ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order ? number_format($order->quantity, 0, ',', ' ') : '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order ? number_format($order->current_quantity, 0, ',', ' ') : '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->quantityAtYesterdaySameTime($order) ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->mould?->cavity_count ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->cycle_time === null ? '-' : number_format($order->cycle_time / 1000, 2, ',', ' ') }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->product?->planned_cycle_time === null ? '-' : number_format($order->product->planned_cycle_time / 1000, 2, ',', ' ') }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ ($utilization = $metrics->utilizationLast24Hours($order)) === null ? '-' : number_format($utilization, 1, ',', ' ').'%' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->theoreticalDailyProduction($order) ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->producedLast24Hours() ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->color_percentage === null ? '-' : number_format((float) $order->color_percentage, 2, ',', ' ').'%' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ ($colorConsumption = $metrics->dailyColorConsumptionKg($order)) === null ? '-' : number_format($colorConsumption, 3, ',', ' ') }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">
+                                        @if ($nextOrder)
+                                            <span class="block font-semibold">{{ $nextOrder->order_number }}</span>
+                                            <span class="block">{{ $nextOrder->product?->code ?? $nextOrder->product?->name }}</span>
+                                        @else
+                                            -
+                                        @endif
+                                    </td>
+                                    <td class="rounded-r-md border-y border-r border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">
+                                        @forelse ($metrics->waitingOrders() as $waitingOrder)
+                                            <span class="block">{{ $waitingOrder->order_number }} · {{ $waitingOrder->product?->code ?? $waitingOrder->product?->name }}</span>
+                                        @empty
+                                            -
+                                        @endforelse
+                                    </td>
+                                </tr>
+                            </tbody>
+                        @empty
+                            <tbody>
+                                <tr>
+                                    <td colspan="20" class="rounded-md bg-white p-8 text-center text-slate-500">{{ $this->t('no_machines') }}</td>
+                                </tr>
+                            </tbody>
+                        @endforelse
+                    </table>
                 </div>
 
-                <div class="grid gap-5 lg:grid-cols-2">
+                <div class="grid gap-4 sm:grid-cols-2 xl:hidden">
                     @forelse ($this->machines->filter(fn ($machine) => $this->machineMatchesFilter($machine, $machineFilter)) as $machine)
                         @php($order = $machine->orders->first())
-                        <article wire:key="machine-{{ $machine->id }}" wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}" class="cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600">
+                        <article wire:key="machine-card-{{ $machine->id }}" wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}" class="cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600">
                             <div class="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
                                 <div>
                                     <h2 class="text-lg font-bold text-slate-900">{{ $machine->name }}</h2>
                                     <p class="text-sm text-slate-500">{{ $machine->type }}</p>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <span wire:key="machine-status-{{ $machine->id }}-{{ $machine->status }}" @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($machine->status)])>{{ $this->statusLabel($machine->status) }}</span>
+                                    <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($machine->status)])>{{ $this->statusLabel($machine->status) }}</span>
                                     @if ($this->canDo(\App\Enums\Role::START_MACHINE) || $this->canDo(\App\Enums\Role::STOP_MACHINE) || $this->canDo(\App\Enums\Role::REPORT_EQUIPMENT_WARNING))
                                         <button wire:click.stop="openMachineModal({{ $machine->id }})" class="rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-teal-700" title="{{ $this->t('change_status') }}">⚙</button>
                                     @endif
@@ -1084,8 +1146,8 @@ new class extends Component
                             </div>
                             <div class="p-5">
                                 <dl class="grid grid-cols-2 gap-3 text-sm">
-                                    <div><dt class="text-slate-500">{{ $this->t('machine_status_label') }}</dt><dd class="mt-0.5"><span wire:key="machine-card-status-{{ $machine->id }}-{{ $machine->status }}" @class(['inline-block rounded-full px-2.5 py-0.5 text-xs font-bold', $this->statusClass($machine->status)])>{{ $machine->status === 'active' ? $this->t('good') : $this->statusLabel($machine->status) }}</span>@if ($machine->problem_description && $machine->status !== 'active')<p class="mt-1 break-words text-xs text-slate-700">{{ $machine->problem_description }}</p>@endif</dd></div>
-                                    <div><dt class="text-slate-500">{{ $this->t('mould_status_label') }}</dt><dd class="mt-0.5">@if ($order?->mould)<span wire:key="mould-card-status-{{ $order->mould->id }}-{{ $order->mould->status }}" @class(['inline-block rounded-full px-2.5 py-0.5 text-xs font-bold', $this->statusClass($order->mould->status)])>{{ $order->mould->status === 'active' ? $this->t('good') : $this->statusLabel($order->mould->status) }}</span>@if ($order->mould->problem_description && $order->mould->status !== 'active')<p class="mt-1 break-words text-xs text-slate-700">{{ $order->mould->problem_description }}</p>@endif @else<span class="font-semibold">-</span>@endif</dd></div>
+                                    <div><dt class="text-slate-500">{{ $this->t('machine_status_label') }}</dt><dd class="mt-0.5"><span @class(['inline-block rounded-full px-2.5 py-0.5 text-xs font-bold', $this->statusClass($machine->status)])>{{ $machine->status === 'active' ? $this->t('good') : $this->statusLabel($machine->status) }}</span>@if ($machine->problem_description && $machine->status !== 'active')<p class="mt-1 break-words text-xs text-slate-700">{{ $machine->problem_description }}</p>@endif</dd></div>
+                                    <div><dt class="text-slate-500">{{ $this->t('mould_status_label') }}</dt><dd class="mt-0.5">@if ($order?->mould)<span @class(['inline-block rounded-full px-2.5 py-0.5 text-xs font-bold', $this->statusClass($order->mould->status)])>{{ $order->mould->status === 'active' ? $this->t('good') : $this->statusLabel($order->mould->status) }}</span>@if ($order->mould->problem_description && $order->mould->status !== 'active')<p class="mt-1 break-words text-xs text-slate-700">{{ $order->mould->problem_description }}</p>@endif @else<span class="font-semibold">-</span>@endif</dd></div>
                                 </dl>
                                 @if ($order)
                                     <div class="mt-5 rounded-lg border border-teal-100 bg-teal-50 p-4">
@@ -1101,7 +1163,7 @@ new class extends Component
                                         <div class="mt-4 flex justify-between text-sm"><span>{{ $this->t('current_quantity') }}</span><strong>{{ $order->current_quantity }} / {{ $order->quantity }} db</strong></div>
                                         @include('partials.production-progress-bar', ['order' => $order])
                                         <div class="mt-4 flex flex-wrap gap-2">
-                                            <span wire:key="quality-status-{{ $order->id }}-{{ $this->qualityStatus($order) }}" @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($this->qualityStatus($order))])>
+                                            <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($this->qualityStatus($order))])>
                                                 {{ $this->t('quality') }}: {{ $this->statusLabel($this->qualityStatus($order)) }}
                                             </span>
                                             @php($lastQualityCheck = $this->lastQualityCheckAt($order))
@@ -1123,7 +1185,7 @@ new class extends Component
                             </div>
                         </article>
                     @empty
-                        <p class="rounded-xl bg-white p-8 text-center text-slate-500 lg:col-span-2">{{ $this->t('no_machines') }}</p>
+                        <p class="rounded-xl bg-white p-8 text-center text-slate-500 sm:col-span-2">{{ $this->t('no_machines') }}</p>
                     @endforelse
                 </div>
 
@@ -1270,7 +1332,10 @@ new class extends Component
 
     @include('partials.footer')
     @if ($detailMachineId && ($detail = $this->detailMachine))
-        @php($detailOrder = $detail->orders->first())
+        @php($detailMetrics = $detail->productionMetrics())
+        @php($detailOrder = $detailMetrics->currentOrder() ?? $detailMetrics->nextActivatedOrder())
+        @php($detailNextOrder = $detailMetrics->nextActivatedOrder())
+        @php($detailNextOrder = $detailNextOrder?->is($detailOrder) ? null : $detailNextOrder)
         @php($detailMould = $detailOrder?->mould)
         <div wire:key="machine-detail-{{ $detail->id }}" wire:click.self="closeMachineDetail" class="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 sm:items-center sm:p-4">
             <div class="flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:rounded-xl">
@@ -1341,20 +1406,43 @@ new class extends Component
                             @endif
                         </div>
                         @if ($detailOrder)
+                            @php($lastQualityCheck = $this->lastQualityCheckAt($detailOrder))
                             <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
                                 <div><dt class="text-slate-500">{{ $this->t('order_number') }}</dt><dd class="font-semibold">{{ $detailOrder->order_number }}</dd></div>
                                 <div class="col-span-2"><dt class="text-slate-500">{{ $this->t('product') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->name ?? '-' }} <span class="font-normal text-slate-500">{{ $detailOrder->product?->code }}</span></dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('customer') }}</dt><dd class="font-semibold">{{ $detailOrder->customer }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('required_quantity') }}</dt><dd class="font-semibold">{{ number_format($detailOrder->quantity, 0, ',', ' ') }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('planned_cycle') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->planned_cycle_time ? number_format($detailOrder->product->planned_cycle_time / 1000, 1, ',', ' ').' s' : '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('actual_cycle') }}</dt><dd class="font-semibold">{{ $detailOrder->cycle_time ? number_format($detailOrder->cycle_time / 1000, 1, ',', ' ').' s' : '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('net_weight') }}</dt><dd class="font-semibold">{{ $detailOrder->net_weight !== null ? $detailOrder->net_weight.' g' : '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('gross_weight') }}</dt><dd class="font-semibold">{{ $detailOrder->gross_weight !== null ? $detailOrder->gross_weight.' g' : '-' }}</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('color_percentage') }}</dt><dd class="font-semibold">{{ $detailOrder->color_percentage !== null ? number_format((float) $detailOrder->color_percentage, 2, ',', ' ').'%' : '-' }}</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('yesterday_quantity_same_time') }}</dt><dd class="font-semibold">{{ $detailMetrics->quantityAtYesterdaySameTime($detailOrder) ?? '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('started_at') }}</dt><dd class="font-semibold">{{ $this->productionStartedAt($detailOrder)?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-' }}</dd></div>
                             </dl>
+                            <dl class="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-white/80 p-3 text-sm sm:grid-cols-4">
+                                <div><dt class="text-slate-500">{{ $this->t('utilization_last_24_hours') }}</dt><dd class="font-semibold">{{ ($utilization = $detailMetrics->utilizationLast24Hours($detailOrder)) === null ? '-' : number_format($utilization, 1, ',', ' ').'%' }}</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('theoretical_daily_production') }}</dt><dd class="font-semibold">{{ $detailMetrics->theoreticalDailyProduction($detailOrder) ?? '-' }} db</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('actual_production_last_24_hours') }}</dt><dd class="font-semibold">{{ $detailMetrics->producedLast24Hours() ?? '-' }} db</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('daily_color_consumption') }}</dt><dd class="font-semibold">{{ ($consumption = $detailMetrics->dailyColorConsumptionKg($detailOrder)) === null ? '-' : number_format($consumption, 3, ',', ' ').' kg' }}</dd></div>
+                            </dl>
+                            @if ($detailOrder->product?->material || $detailOrder->product?->color || $detailOrder->product?->additives?->isNotEmpty())
+                                <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
+                                    <div><dt class="text-slate-500">{{ $this->t('material') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->material?->name ?? '-' }}</dd></div>
+                                    <div><dt class="text-slate-500">{{ $this->t('color') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->color?->name ?? '-' }}</dd></div>
+                                    <div class="col-span-2"><dt class="text-slate-500">{{ $this->t('additives') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->additives?->pluck('name')->join(', ') ?: '-' }}</dd></div>
+                                </dl>
+                            @endif
                             <div class="mt-4 flex justify-between text-sm"><span>{{ $this->t('current_quantity') }}</span><strong>{{ $detailOrder->current_quantity }} / {{ $detailOrder->quantity }} db</strong></div>
                             @include('partials.production-progress-bar', ['order' => $detailOrder])
                             <div class="mt-3">
                                 <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($this->qualityStatus($detailOrder))])>{{ $this->t('quality') }}: {{ $this->statusLabel($this->qualityStatus($detailOrder)) }}</span>
+                                <p @class(['mt-2 text-xs font-medium', 'text-red-700' => $this->qualityCheckOverdue($detailOrder), 'text-slate-600' => ! $this->qualityCheckOverdue($detailOrder)])>
+                                    {{ $lastQualityCheck ? $this->t('last_quality_check_at', ['time' => $lastQualityCheck->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i:s')]) : $this->t('no_quality_check_yet') }}
+                                </p>
+                                @if ($this->qualityCheckOverdue($detailOrder))
+                                    <p class="mt-1 text-xs font-bold text-red-700">{{ $this->t('quality_check_overdue') }}</p>
+                                @endif
                             </div>
                             @if ($detailOrder->pause_description && $detailOrder->status === 'paused')
                                 <p class="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-800"><strong>{{ $this->t('pause_reason') }}:</strong> {{ $detailOrder->pause_description }}</p>
@@ -1366,9 +1454,26 @@ new class extends Component
                                 @if ($this->canCheckQuality())
                                     <button wire:click="openQualityModal({{ $detailOrder->id }})" class="rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">{{ $this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'color_check' : 'quality_check') }}</button>
                                 @endif
+                                <button wire:click="openProductionProtocol({{ $detailOrder->id }})" class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">{{ $this->t('production_protocol') }}</button>
                             </div>
                         @else
                             <p class="mt-3 rounded-lg bg-white p-3 text-sm text-slate-500">{{ $this->t('no_running_order') }}</p>
+                        @endif
+                        @if ($detailNextOrder)
+                            <div class="mt-4 rounded-lg bg-white/80 p-3 text-sm">
+                                <h4 class="font-semibold">{{ $this->t('next_activated_order') }}</h4>
+                                <p class="mt-1">{{ $detailNextOrder->order_number }} · {{ $detailNextOrder->customer }} · {{ $detailNextOrder->product?->code ?? $detailNextOrder->product?->name }}</p>
+                            </div>
+                        @endif
+                        @if ($detailMetrics->waitingOrders()->isNotEmpty())
+                            <div class="mt-3 rounded-lg bg-white/80 p-3 text-sm">
+                                <h4 class="font-semibold">{{ $this->t('waiting_orders') }}</h4>
+                                <ul class="mt-1 list-inside list-disc">
+                                    @foreach ($detailMetrics->waitingOrders() as $waitingOrder)
+                                        <li>{{ $waitingOrder->order_number }} · {{ $waitingOrder->customer }} · {{ $waitingOrder->product?->code ?? $waitingOrder->product?->name }}</li>
+                                    @endforeach
+                                </ul>
+                            </div>
                         @endif
                     </section>
                 </div>

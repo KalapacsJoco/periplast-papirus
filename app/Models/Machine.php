@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\MachineProductionMetrics;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -26,6 +27,11 @@ class Machine extends Model
     public function orders(): HasMany
     {
         return $this->hasMany(Order::class);
+    }
+
+    public function productionMetrics(): MachineProductionMetrics
+    {
+        return new MachineProductionMetrics($this);
     }
 
     public function moulds(): BelongsToMany

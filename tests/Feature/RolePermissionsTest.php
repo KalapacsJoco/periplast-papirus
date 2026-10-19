@@ -186,6 +186,7 @@ class RolePermissionsTest extends TestCase
 
             Livewire::actingAs($operator)
                 ->test('production-dashboard')
+                ->call('openMachineDetail', $order->machine_id)
                 ->assertSee('Elméleti mennyiség: 40 db')
                 ->assertSee('bg-red-400');
         } finally {
@@ -365,7 +366,10 @@ class RolePermissionsTest extends TestCase
         $mould = \App\Models\Mould::factory()->create(['status' => 'warning', 'problem_description' => 'Kidobó csap kopott']);
         Order::factory()->create(['machine_id' => $machine->id, 'mould_id' => $mould->id, 'status' => 'in_progress']);
 
-        Livewire::actingAs($user)->test('production-dashboard')->assertSee('Kidobó csap kopott');
+        Livewire::actingAs($user)
+            ->test('production-dashboard')
+            ->call('openMachineDetail', $machine->id)
+            ->assertSee('Kidobó csap kopott');
     }
 
     public function test_machine_card_shows_good_for_active_and_the_entered_reason_for_stopped(): void
@@ -375,6 +379,7 @@ class RolePermissionsTest extends TestCase
 
         Livewire::actingAs($user)
             ->test('production-dashboard')
+            ->call('openMachineDetail', $machine->id)
             ->call('openMachineModal', $machine->id)
             ->set('status', 'stopped')
             ->call('saveMachineStatus')
@@ -394,6 +399,7 @@ class RolePermissionsTest extends TestCase
 
         Livewire::actingAs($operator)
             ->test('production-dashboard')
+            ->call('openMachineDetail', $machine->id)
             ->assertSee('Aktív')
             ->call('openMachineModal', $machine->id)
             ->set('status', 'warning')
