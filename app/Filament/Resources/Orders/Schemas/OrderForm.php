@@ -19,8 +19,12 @@ class OrderForm
                     ->prefix('ORD-')
                     ->required(),
                 DatePicker::make('date')
+                    ->label('Expected production start')
                     ->default(now())
                     ->required(),
+                DatePicker::make('planned_end_date')
+                    ->label('Expected production end')
+                    ->afterOrEqual('date'),
                 TextInput::make('customer')
                     ->required(),
                 TextInput::make('quantity')

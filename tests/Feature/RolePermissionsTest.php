@@ -22,8 +22,8 @@ class RolePermissionsTest extends TestCase
     {
         $this->assertSame([Role::PERMISSION_ALL], Role::Admin->permissions());
         $this->assertSame([Role::ACTIVATE_ORDER, Role::PAUSE_ORDER, Role::INTERRUPT_ORDER], Role::Programmer->permissions());
-        $this->assertSame([Role::ASSIGN_ORDER, Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHECK_QUALITY], Role::Coordinator->permissions());
-        $this->assertSame([Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHECK_COLOR], Role::Operator->permissions());
+        $this->assertSame([Role::ASSIGN_ORDER, Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHECK_QUALITY, Role::ENTER_MEASURED_DATA], Role::Coordinator->permissions());
+        $this->assertSame([Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHECK_COLOR, Role::ENTER_MEASURED_DATA], Role::Operator->permissions());
         $this->assertSame([Role::CHECK_QUALITY, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING], Role::QualityManager->permissions());
     }
 
@@ -212,6 +212,60 @@ class RolePermissionsTest extends TestCase
 
         $this->assertNull($component->instance()->expectedQuantity($order->load(['mould', 'product'])));
         $component->assertDontSee('Elméleti mennyiség:');
+    }
+
+    public function test_measured_data_gates_quality_check_and_flags_deviations(): void
+    {
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $qualityManager = User::factory()->create(['role' => Role::QualityManager]);
+        $order = Order::factory()->create([
+            'status' => 'in_progress',
+            'cycle_time' => 10000,
+            'net_weight' => 10,
+            'gross_weight' => 12,
+            'color_percentage' => 2,
+            'measured_cycle_time' => null,
+            'measured_net_weight' => null,
+            'measured_gross_weight' => null,
+            'measured_color_percentage' => null,
+            'measured_at' => null,
+        ]);
+
+        Livewire::actingAs($qualityManager)
+            ->test('production-dashboard')
+            ->call('openQualityModal', $order->id)
+            ->assertSet('showQualityModal', false);
+
+        Livewire::actingAs($coordinator)
+            ->test('production-dashboard')
+            ->call('openMeasuredModal', $order->id)
+            ->set('measuredCycleSeconds', 10.01)
+            ->set('measuredNetWeight', 10.01)
+            ->set('measuredGrossWeight', 12.5)
+            ->set('measuredColorPercentage', 2)
+            ->call('saveMeasuredData')
+            ->assertSet('showMeasuredModal', false);
+
+        $order = $order->fresh();
+        $this->assertTrue($order->hasMeasuredData());
+        $this->assertSame(10010, $order->measured_cycle_time);
+        $this->assertFalse($order->measuredDeviates('cycle_time'));
+        $this->assertFalse($order->measuredDeviates('net_weight'));
+        $this->assertTrue($order->measuredDeviates('gross_weight'));
+        $this->assertFalse($order->measuredDeviates('color_percentage'));
+
+        Livewire::actingAs($qualityManager)
+            ->test('production-dashboard')
+            ->call('openQualityModal', $order->id)
+            ->assertSet('showQualityModal', true);
+
+        $order->machine->update(['status' => 'setup']);
+        Livewire::actingAs($qualityManager)
+            ->test('production-dashboard')
+            ->call('openQualityModal', $order->id)
+            ->set('currentQuantity', 0)
+            ->call('saveQualityCheck', true);
+        $this->assertSame('active', $order->machine->fresh()->status);
     }
 
     public function test_quality_check_asks_for_confirmation_when_quantity_is_below_last_or_above_expected(): void

@@ -26,6 +26,22 @@ class OrdersTable
                 TextColumn::make('product.name')
                     ->searchable()
                     ->sortable(),
+                TextColumn::make('date')
+                    ->label('Planned start')
+                    ->date()
+                    ->sortable(),
+                TextColumn::make('planned_end_date')
+                    ->label('Planned end')
+                    ->date()
+                    ->sortable(),
+                TextColumn::make('started_at')
+                    ->label('Actual start')
+                    ->date()
+                    ->sortable(),
+                TextColumn::make('ended_at')
+                    ->label('Actual end')
+                    ->date()
+                    ->sortable(),
                 TextColumn::make('cycle_time')
                     ->label('Cycle (ms)')
                     ->numeric()

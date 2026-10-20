@@ -208,7 +208,7 @@ Route::get('/products', function () {
 
 Route::get('/orders', function () {
     return Order::query()
-        ->select(['id', 'order_number', 'machine_id', 'mould_id', 'product_id', 'date', 'customer', 'quantity', 'current_quantity', 'good_quantity', 'bad_quantity', 'started_at', 'ended_at', 'last_paused_at', 'cycle_time', 'net_weight', 'gross_weight', 'color_percentage', 'additives_percentages', 'production_protocol', 'status', 'created_at'])
+        ->select(['id', 'order_number', 'machine_id', 'mould_id', 'product_id', 'date', 'planned_end_date', 'customer', 'quantity', 'current_quantity', 'good_quantity', 'bad_quantity', 'started_at', 'ended_at', 'last_paused_at', 'cycle_time', 'net_weight', 'gross_weight', 'color_percentage', 'measured_cycle_time', 'measured_net_weight', 'measured_gross_weight', 'measured_color_percentage', 'measured_at', 'additives_percentages', 'production_protocol', 'status', 'created_at'])
         ->with([
             'machine:id,name,status,problem_description',
             'mould:id,name,number,cavity_count,status,problem_description',
@@ -398,6 +398,25 @@ Route::post('/orders/{id}/protocol', function (Request $request, $id) use ($appe
     ]);
 });
 
+Route::post('/orders/{id}/measured-data', function (Request $request, $id) use ($appendProtocolEntry) {
+    $validated = $request->validate([
+        'measured_cycle_time' => 'required|integer|min:1',
+        'measured_net_weight' => 'required|numeric|min:0',
+        'measured_gross_weight' => 'required|numeric|min:0',
+        'measured_color_percentage' => 'required|numeric|min:0',
+    ]);
+
+    $order = Order::findOrFail($id);
+    $order->update($validated + ['measured_at' => now()]);
+    $appendProtocolEntry($order->refresh(), (int) $order->current_quantity, 'parameter_change', 'Measured data updated.');
+
+    return $order->load([
+        'machine:id,name,status,problem_description',
+        'mould:id,name,number,cavity_count,status,problem_description',
+        'product:id,name,code,is_active',
+    ]);
+});
+
 Route::post('/orders/{id}/quality-check', function (Request $request, $id) use ($appendProtocolEntry) {
     $validated = $request->validate([
         'quality_status' => 'required|in:good,warning,quality_issue',
@@ -409,6 +428,11 @@ Route::post('/orders/{id}/quality-check', function (Request $request, $id) use (
     ]);
 
     $order = Order::findOrFail($id);
+    if (! $order->hasMeasuredData()) {
+        throw ValidationException::withMessages([
+            'measured_data' => ['Measured data must be filled in before a quality check.'],
+        ]);
+    }
     $existingProtocol = is_array($order->production_protocol) ? $order->production_protocol : [];
     $qualityChecks = is_array($existingProtocol['quality_checks'] ?? null) ? $existingProtocol['quality_checks'] : [];
 

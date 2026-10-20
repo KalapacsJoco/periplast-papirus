@@ -30,15 +30,17 @@ enum Role: string
 
     public const CHECK_COLOR = 'quality.check_color';
 
+    public const ENTER_MEASURED_DATA = 'order.measure';
+
     /** @return array<int, string> */
     public function permissions(): array
     {
         return match ($this) {
             self::Admin => [self::PERMISSION_ALL],
             self::Programmer => [self::ACTIVATE_ORDER, self::PAUSE_ORDER, self::INTERRUPT_ORDER],
-            self::Operator => [self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_COLOR],
+            self::Operator => [self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
             self::QualityManager => [self::CHECK_QUALITY, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING],
-            self::Coordinator => [self::ASSIGN_ORDER, self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_QUALITY],
+            self::Coordinator => [self::ASSIGN_ORDER, self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_QUALITY, self::ENTER_MEASURED_DATA],
         };
     }
 

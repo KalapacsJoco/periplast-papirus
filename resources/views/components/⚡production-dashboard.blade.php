@@ -68,6 +68,18 @@ new class extends Component
 
     public int $badQuantity = 0;
 
+    public ?int $measuredOrderId = null;
+
+    public bool $showMeasuredModal = false;
+
+    public $measuredCycleSeconds = null;
+
+    public $measuredNetWeight = null;
+
+    public $measuredGrossWeight = null;
+
+    public $measuredColorPercentage = null;
+
     public string $qualityStatus = 'good';
 
     public string $quantityWarning = '';
@@ -670,6 +682,52 @@ new class extends Component
             $this->notifyWorkflowRecipients($order->refresh(), 'activated');
         }
         $this->flashMessage = $this->t('order_activated');
+        if (! $order->hasMeasuredData() && $this->canEnterMeasuredData()) {
+            $this->openMeasuredModal($order->id);
+        }
+        unset($this->machines, $this->waitingOrders);
+    }
+
+    public function canEnterMeasuredData(): bool
+    {
+        return $this->isAdmin() || $this->canDo(Role::ENTER_MEASURED_DATA);
+    }
+
+    public function openMeasuredModal(int $orderId): void
+    {
+        $this->ensurePermission(Role::ENTER_MEASURED_DATA);
+        $order = Order::findOrFail($orderId);
+        $this->measuredOrderId = $order->id;
+        $this->measuredCycleSeconds = $order->measured_cycle_time === null ? null : $order->measured_cycle_time / 1000;
+        $this->measuredNetWeight = $order->measured_net_weight;
+        $this->measuredGrossWeight = $order->measured_gross_weight;
+        $this->measuredColorPercentage = $order->measured_color_percentage;
+        $this->resetValidation();
+        $this->showMeasuredModal = true;
+    }
+
+    public function saveMeasuredData(): void
+    {
+        $this->ensurePermission(Role::ENTER_MEASURED_DATA);
+        $validated = $this->validate([
+            'measuredCycleSeconds' => ['required', 'numeric', 'gt:0'],
+            'measuredNetWeight' => ['required', 'numeric', 'min:0'],
+            'measuredGrossWeight' => ['required', 'numeric', 'min:0'],
+            'measuredColorPercentage' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        $order = Order::findOrFail($this->measuredOrderId);
+        $order->update([
+            'measured_cycle_time' => (int) round((float) $validated['measuredCycleSeconds'] * 1000),
+            'measured_net_weight' => (float) $validated['measuredNetWeight'],
+            'measured_gross_weight' => (float) $validated['measuredGrossWeight'],
+            'measured_color_percentage' => (float) $validated['measuredColorPercentage'],
+            'measured_at' => now(),
+        ]);
+        $this->appendProtocolEntry($order->refresh(), $order->current_quantity, 'parameter_change', $this->t('measured_data_saved_note'));
+
+        $this->showMeasuredModal = false;
+        $this->flashMessage = $this->t('measured_data_saved');
         unset($this->machines, $this->waitingOrders);
     }
 
@@ -677,6 +735,11 @@ new class extends Component
     {
         $this->ensurePermission(Role::CHECK_QUALITY, Role::CHECK_COLOR);
         $order = Order::findOrFail($orderId);
+        if (! $order->hasMeasuredData()) {
+            $this->flashMessage = $this->t('measured_data_required');
+
+            return;
+        }
         $this->qualityOrderId = $order->id;
         $this->currentQuantity = $order->current_quantity;
         $this->qualityStatus = 'good';
@@ -704,6 +767,7 @@ new class extends Component
         $resolved = $this->requiresResolution();
 
         $order = Order::findOrFail($this->qualityOrderId);
+        abort_unless($order->hasMeasuredData(), 422, $this->t('measured_data_required'));
         $quantity = min($validated['currentQuantity'], $order->quantity);
 
         if (! $confirmed) {
@@ -752,6 +816,10 @@ new class extends Component
         }
 
         $order->update($orderUpdates);
+        if ($order->machine?->status === 'setup' && $order->hasMeasuredData()) {
+            $order->machine->update(['status' => 'active', 'problem_description' => null]);
+            unset($this->machines, $this->detailMachine);
+        }
         $this->appendProtocolEntry(
             $order->refresh(),
             $quantity,
@@ -1158,20 +1226,20 @@ new class extends Component
                                     <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->name }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->type }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order && $this->qualityCheckOverdue($order))<span class="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-black text-white" title="{{ $this->t('quality_check_overdue') }}" aria-label="{{ $this->t('quality_check_overdue') }}">!</span>@endif{{ $order?->product?->name ?? '-' }}</td>
-                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->gross_weight ?? '-' }}</td>
-                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->net_weight ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_gross_weight !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('gross_weight')]) title="{{ $this->t('theoretical') }}: {{ $order?->gross_weight ?? '-' }}">{{ $order->measured_gross_weight }}</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->gross_weight ?? '-' }}</span>@endif</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_net_weight !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('net_weight')]) title="{{ $this->t('theoretical') }}: {{ $order?->net_weight ?? '-' }}">{{ $order->measured_net_weight }}</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->net_weight ?? '-' }}</span>@endif</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->order_number ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->product?->code ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order ? number_format($order->quantity, 0, ',', ' ') : '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order ? number_format($order->current_quantity, 0, ',', ' ') : '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->quantityAtYesterdaySameTime($order) ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->mould?->cavity_count ?? '-' }}</td>
-                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->cycle_time === null ? '-' : number_format($order->cycle_time / 1000, 2, ',', ' ') }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_cycle_time !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('cycle_time')]) title="{{ $this->t('theoretical') }}: {{ $order?->cycle_time === null ? '-' : number_format($order->cycle_time / 1000, 2, ',', ' ') }}">{{ number_format($order->measured_cycle_time / 1000, 2, ',', ' ') }}</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->cycle_time === null ? '-' : number_format($order->cycle_time / 1000, 2, ',', ' ') }}</span>@endif</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->product?->planned_cycle_time === null ? '-' : number_format($order->product->planned_cycle_time / 1000, 2, ',', ' ') }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ ($utilization = $metrics->utilizationLast24Hours($order)) === null ? '-' : number_format($utilization, 1, ',', ' ').'%' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->theoreticalDailyProduction($order) ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->producedLast24Hours() ?? '-' }}</td>
-                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->color_percentage === null ? '-' : number_format((float) $order->color_percentage, 2, ',', ' ').'%' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_color_percentage !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('color_percentage')]) title="{{ $this->t('theoretical') }}: {{ $order?->color_percentage === null ? '-' : number_format((float) $order->color_percentage, 2, ',', ' ').'%' }}">{{ number_format((float) $order->measured_color_percentage, 2, ',', ' ') }}%</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->color_percentage === null ? '-' : number_format((float) $order->color_percentage, 2, ',', ' ').'%' }}</span>@endif</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ ($colorConsumption = $metrics->dailyColorConsumptionKg($order)) === null ? '-' : number_format($colorConsumption, 3, ',', ' ') }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">
                                         @if ($nextOrder)
@@ -1493,12 +1561,15 @@ new class extends Component
                                 <div><dt class="text-slate-500">{{ $this->t('customer') }}</dt><dd class="font-semibold">{{ $detailOrder->customer }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('required_quantity') }}</dt><dd class="font-semibold">{{ number_format($detailOrder->quantity, 0, ',', ' ') }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('planned_cycle') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->planned_cycle_time ? number_format($detailOrder->product->planned_cycle_time / 1000, 1, ',', ' ').' s' : '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('actual_cycle') }}</dt><dd class="font-semibold">{{ $detailOrder->cycle_time ? number_format($detailOrder->cycle_time / 1000, 1, ',', ' ').' s' : '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('net_weight') }}</dt><dd class="font-semibold">{{ $detailOrder->net_weight !== null ? $detailOrder->net_weight.' g' : '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('gross_weight') }}</dt><dd class="font-semibold">{{ $detailOrder->gross_weight !== null ? $detailOrder->gross_weight.' g' : '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('color_percentage') }}</dt><dd class="font-semibold">{{ $detailOrder->color_percentage !== null ? number_format((float) $detailOrder->color_percentage, 2, ',', ' ').'%' : '-' }}</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('actual_cycle') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->cycle_time ? number_format($detailOrder->cycle_time / 1000, 2, ',', ' ').' s' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('cycle_time')])>{{ $detailOrder->measured_cycle_time ? number_format($detailOrder->measured_cycle_time / 1000, 2, ',', ' ').' s' : '-' }}</span></dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('net_weight') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->net_weight !== null ? $detailOrder->net_weight.' g' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('net_weight')])>{{ $detailOrder->measured_net_weight !== null ? $detailOrder->measured_net_weight.' g' : '-' }}</span></dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('gross_weight') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->gross_weight !== null ? $detailOrder->gross_weight.' g' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('gross_weight')])>{{ $detailOrder->measured_gross_weight !== null ? $detailOrder->measured_gross_weight.' g' : '-' }}</span></dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('color_percentage') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->color_percentage !== null ? number_format((float) $detailOrder->color_percentage, 2, ',', ' ').'%' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('color_percentage')])>{{ $detailOrder->measured_color_percentage !== null ? number_format((float) $detailOrder->measured_color_percentage, 2, ',', ' ').'%' : '-' }}</span></dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('yesterday_quantity_same_time') }}</dt><dd class="font-semibold">{{ $detailMetrics->quantityAtYesterdaySameTime($detailOrder) ?? '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('started_at') }}</dt><dd class="font-semibold">{{ $this->productionStartedAt($detailOrder)?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-' }}</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('planned_start') }}</dt><dd class="font-semibold">{{ $detailOrder->date?->format('Y-m-d') ?? '-' }}</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('actual_start') }}</dt><dd class="font-semibold">{{ $this->productionStartedAt($detailOrder)?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-' }}</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('planned_end') }}</dt><dd class="font-semibold">{{ $detailOrder->planned_end_date?->format('Y-m-d') ?? '-' }}</dd></div>
+                                <div><dt class="text-slate-500">{{ $this->t('actual_end') }}</dt><dd class="font-semibold">{{ $detailOrder->ended_at?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-' }}</dd></div>
                             </dl>
                             <dl class="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-white/80 p-3 text-sm sm:grid-cols-4">
                                 <div><dt class="text-slate-500">{{ $this->t('utilization_last_24_hours') }}</dt><dd class="font-semibold">{{ ($utilization = $detailMetrics->utilizationLast24Hours($detailOrder)) === null ? '-' : number_format($utilization, 1, ',', ' ').'%' }}</dd></div>
@@ -1531,7 +1602,12 @@ new class extends Component
                                 @if ($this->canManageOrders())
                                     <button wire:click="openOrderModal({{ $detailOrder->id }})" class="rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t('manage_order') }}</button>
                                 @endif
-                                @if ($this->canCheckQuality())
+                                @if ($this->canEnterMeasuredData())
+                                    <button wire:click="openMeasuredModal({{ $detailOrder->id }})" class="rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">{{ $this->t('measured_data') }}</button>
+                                @endif
+                                @if ($this->canCheckQuality() && ! $detailOrder->hasMeasuredData())
+                                    <p class="w-full rounded-md bg-amber-50 p-2 text-xs font-semibold text-amber-800">{{ $this->t('measured_data_required') }}</p>
+                                @elseif ($this->canCheckQuality())
                                     <button wire:click="openQualityModal({{ $detailOrder->id }})" class="rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">{{ $this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'color_check' : 'quality_check') }}</button>
                                 @endif
                                 <button wire:click="openProductionProtocol({{ $detailOrder->id }})" class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">{{ $this->t('production_protocol') }}</button>
@@ -1686,6 +1762,24 @@ new class extends Component
                     </section>
                 </div>
             </div>
+        </div>
+    @endif
+
+    @if ($showMeasuredModal)
+        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
+            <form wire:submit="saveMeasuredData" class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
+                <h2 class="text-xl font-bold">{{ $this->t('measured_data') }}</h2>
+                <div class="mt-5 grid gap-4">
+                    <label class="text-sm font-semibold">{{ $this->t('actual_cycle') }} (s)<input wire:model="measuredCycleSeconds" type="number" step="0.01" min="0" class="mt-1 w-full rounded-md border-slate-300">@error('measuredCycleSeconds')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm font-semibold">{{ $this->t('net_weight') }} (g)<input wire:model="measuredNetWeight" type="number" step="0.001" min="0" class="mt-1 w-full rounded-md border-slate-300">@error('measuredNetWeight')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm font-semibold">{{ $this->t('gross_weight') }} (g)<input wire:model="measuredGrossWeight" type="number" step="0.001" min="0" class="mt-1 w-full rounded-md border-slate-300">@error('measuredGrossWeight')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm font-semibold">{{ $this->t('color_percentage') }} (%)<input wire:model="measuredColorPercentage" type="number" step="0.01" min="0" class="mt-1 w-full rounded-md border-slate-300">@error('measuredColorPercentage')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>
+                </div>
+                <div class="mt-5 flex justify-end gap-3">
+                    <button type="button" wire:click="$set('showMeasuredModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button>
+                    <button type="submit" wire:loading.attr="disabled" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('save') }}</button>
+                </div>
+            </form>
         </div>
     @endif
 
