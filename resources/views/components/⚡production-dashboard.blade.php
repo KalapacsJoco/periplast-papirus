@@ -21,21 +21,15 @@ new class extends Component
 {
     public string $activeTab = 'machines';
 
-    public ?int $machineId = null;
-
     public ?int $detailMachineId = null;
 
-    public ?int $mouldId = null;
+    public ?int $expandedMachineId = null;
 
     public ?int $orderId = null;
 
     public ?int $qualityOrderId = null;
 
     public ?int $protocolOrderId = null;
-
-    public bool $showMachineModal = false;
-
-    public bool $showMouldModal = false;
 
     public bool $showOrderModal = false;
 
@@ -93,6 +87,10 @@ new class extends Component
     public string $protocolEntryType = 'note';
 
     public string $protocolEntryNote = '';
+
+    public bool $protocolStopsProduction = false;
+
+    public string $protocolResolveTarget = '';
 
     public string $flashMessage = '';
 
@@ -361,7 +359,7 @@ new class extends Component
     public function operators()
     {
         return User::query()
-            ->where('role', Role::Operator->value)
+            ->whereIn('role', [Role::Operator->value, Role::Coordinator->value])
             ->orderBy('name')
             ->get(['id', 'name']);
     }
@@ -420,7 +418,18 @@ new class extends Component
     #[Computed]
     public function detailMachine()
     {
-        if (! $this->detailMachineId) {
+        return $this->machineWithDetails($this->detailMachineId);
+    }
+
+    #[Computed]
+    public function expandedMachine()
+    {
+        return $this->machineWithDetails($this->expandedMachineId);
+    }
+
+    private function machineWithDetails(?int $machineId): ?Machine
+    {
+        if (! $machineId) {
             return null;
         }
 
@@ -437,7 +446,14 @@ new class extends Component
                     ->orderBy('date')
                     ->orderBy('id'),
             ])
-            ->find($this->detailMachineId);
+            ->find($machineId);
+    }
+
+    public function toggleMachineRow(int $machineId): void
+    {
+        $this->ensureAuthenticated();
+        $this->expandedMachineId = $this->expandedMachineId === $machineId ? null : Machine::findOrFail($machineId)->id;
+        unset($this->expandedMachine);
     }
 
     public function openMachineDetail(int $machineId): void
@@ -454,18 +470,6 @@ new class extends Component
     /** True when the open modal would restart equipment or production that was stopped by a fault. */
     public function requiresResolution(): bool
     {
-        if ($this->showMachineModal && $this->machineId) {
-            $current = Machine::find($this->machineId)?->status;
-
-            return in_array($current, ['stopped', 'broken'], true) && $this->status === 'active';
-        }
-
-        if ($this->showMouldModal && $this->mouldId) {
-            $current = Mould::find($this->mouldId)?->status;
-
-            return in_array($current, ['needs_repair', 'under_repair'], true) && in_array($this->status, ['active', 'standby', 'warning'], true);
-        }
-
         if ($this->showQualityModal && $this->qualityOrderId) {
             $order = Order::find($this->qualityOrderId);
 
@@ -478,125 +482,6 @@ new class extends Component
     private function resolutionNote(): string
     {
         return $this->t('resolution_note', ['text' => $this->resolutionDescription]);
-    }
-
-    public function openMachineModal(int $machineId): void
-    {
-        $this->resolutionDescription = '';
-        $this->ensurePermission(Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING);
-        $machine = Machine::findOrFail($machineId);
-        $this->machineId = $machine->id;
-        $this->status = $this->isAdmin() ? $machine->status : '';
-        $this->problemDescription = $machine->problem_description ?? '';
-        $this->resetValidation();
-        $this->showMachineModal = true;
-    }
-
-    public function saveMachineStatus(): void
-    {
-        $this->ensureAuthenticated();
-        match ($this->status) {
-            'active' => $this->ensurePermission(Role::START_MACHINE),
-            'stopped' => $this->ensurePermission(Role::STOP_MACHINE),
-            'warning' => $this->ensurePermission(Role::REPORT_EQUIPMENT_WARNING),
-            default => null,
-        };
-        $validated = $this->validate([
-            'status' => ['required', Rule::in(['active', 'stopped', 'warning', 'broken'])],
-            'problemDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf(in_array($this->status, ['warning', 'broken', 'stopped'], true))],
-            'resolutionDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->requiresResolution())],
-        ]);
-
-        if ($validated['status'] === 'broken') {
-            abort_unless($this->isAdmin(), 403);
-        }
-        $resolved = $this->requiresResolution();
-        $machine = Machine::findOrFail($this->machineId);
-        $machine->update([
-            'status' => $validated['status'],
-            'problem_description' => in_array($validated['status'], ['warning', 'broken', 'stopped'], true)
-                ? $validated['problemDescription']
-                : null,
-        ]);
-
-        Order::query()
-            ->where('machine_id', $machine->id)
-            ->whereIn('status', ['in_progress', 'paused'])
-            ->get()
-            ->each(fn (Order $order) => $this->appendProtocolEntry(
-                $order,
-                $order->current_quantity,
-                'machine_status',
-                $this->t('machine_status_note', ['status' => $this->statusLabel($validated['status'])])
-                    .(in_array($validated['status'], ['warning', 'broken', 'stopped'], true) && filled($validated['problemDescription'] ?? null) ? ': '.$validated['problemDescription'] : '')
-                    .($resolved ? ' — '.$this->resolutionNote() : '')
-            ));
-
-        if ($validated['status'] === 'broken') {
-            $this->pauseOrdersFor('machine_id', $machine->id, $validated['problemDescription'] ?: $this->t('machine_paused_reason'));
-        }
-
-        $this->showMachineModal = false;
-        $this->flashMessage = $this->t('machine_status_updated');
-        unset($this->machines);
-    }
-
-    public function openMouldModal(int $mouldId): void
-    {
-        $this->resolutionDescription = '';
-        $this->ensurePermission(Role::REPORT_EQUIPMENT_WARNING);
-        $mould = Mould::findOrFail($mouldId);
-        $this->mouldId = $mould->id;
-        $this->status = $this->isAdmin() ? $mould->status : '';
-        $this->problemDescription = $mould->problem_description ?? '';
-        $this->resetValidation();
-        $this->showMouldModal = true;
-    }
-
-    public function saveMouldStatus(): void
-    {
-        $this->ensureAuthenticated();
-        $validated = $this->validate([
-            'status' => ['required', Rule::in(['active', 'standby', 'warning', 'needs_repair', 'under_repair'])],
-            'problemDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf(in_array($this->status, ['warning', 'needs_repair'], true))],
-            'resolutionDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->requiresResolution())],
-        ]);
-
-        if (in_array($validated['status'], ['active', 'warning', 'needs_repair'], true)) {
-            $this->ensurePermission(Role::REPORT_EQUIPMENT_WARNING);
-        } else {
-            abort_unless($this->isAdmin(), 403);
-        }
-
-        $resolved = $this->requiresResolution();
-        $mould = Mould::findOrFail($this->mouldId);
-        $mould->update([
-            'status' => $validated['status'],
-            'problem_description' => in_array($validated['status'], ['warning', 'needs_repair'], true)
-                ? $validated['problemDescription']
-                : null,
-        ]);
-
-        Order::query()
-            ->where('mould_id', $mould->id)
-            ->whereIn('status', ['in_progress', 'paused'])
-            ->get()
-            ->each(fn (Order $order) => $this->appendProtocolEntry(
-                $order,
-                $order->current_quantity,
-                'mould_status',
-                $this->t('mould_status_note', ['status' => $this->statusLabel($validated['status'])])
-                    .(in_array($validated['status'], ['warning', 'needs_repair'], true) && filled($validated['problemDescription'] ?? null) ? ': '.$validated['problemDescription'] : '')
-                    .($resolved ? ' — '.$this->resolutionNote() : '')
-            ));
-
-        if ($validated['status'] === 'needs_repair') {
-            $this->pauseOrdersFor('mould_id', $mould->id, $validated['problemDescription'] ?: $this->t('mould_paused_reason'));
-        }
-
-        $this->showMouldModal = false;
-        $this->flashMessage = $this->t('mould_status_updated');
-        unset($this->moulds, $this->machines);
     }
 
     public function openOrderModal(int $orderId): void
@@ -818,7 +703,7 @@ new class extends Component
         $order->update($orderUpdates);
         if ($order->machine?->status === 'setup' && $order->hasMeasuredData()) {
             $order->machine->update(['status' => 'active', 'problem_description' => null]);
-            unset($this->machines, $this->detailMachine);
+            unset($this->machines, $this->detailMachine, $this->expandedMachine);
         }
         $this->appendProtocolEntry(
             $order->refresh(),
@@ -858,7 +743,7 @@ new class extends Component
         } else {
             $operator = User::query()
                 ->whereKey($operatorId)
-                ->where('role', Role::Operator->value)
+                ->whereIn('role', [Role::Operator->value, Role::Coordinator->value])
                 ->firstOrFail();
             $assignmentChanged = (int) $order->assigned_operator_id !== $operator->id;
 
@@ -880,7 +765,7 @@ new class extends Component
 
     public function startAssignedTask(int $orderId): void
     {
-        abort_unless(Auth::user()?->role === Role::Operator, 403);
+        abort_unless(in_array(Auth::user()?->role, [Role::Operator, Role::Coordinator], true), 403);
 
         $order = Order::query()
             ->where('assigned_operator_id', Auth::id())
@@ -905,6 +790,8 @@ new class extends Component
         $this->protocolOrderId = Order::query()->findOrFail($orderId)->id;
         $this->protocolEntryType = 'note';
         $this->protocolEntryNote = '';
+        $this->protocolStopsProduction = false;
+        $this->protocolResolveTarget = '';
         $this->resetValidation();
         $this->showProtocolModal = true;
     }
@@ -913,19 +800,53 @@ new class extends Component
     {
         $this->ensureAuthenticated();
         $validated = $this->validate([
-            'protocolEntryType' => ['required', Rule::in(['note', 'parameter_change', 'machine_issue', 'mould_issue', 'other'])],
+            'protocolEntryType' => ['required', Rule::in(['note', 'parameter_change', 'machine_issue', 'mould_issue', 'other', 'resolved'])],
             'protocolEntryNote' => ['required', 'string', 'max:2000'],
         ]);
 
         $order = Order::query()->findOrFail($this->protocolOrderId);
-        $this->appendProtocolEntry(
-            $order,
-            $order->current_quantity,
-            $validated['protocolEntryType'],
-            $validated['protocolEntryNote']
-        );
+        $type = $validated['protocolEntryType'];
+        $note = $validated['protocolEntryNote'];
+        $stop = $this->protocolStopsProduction;
 
+        if ($type === 'resolved') {
+            $this->ensurePermission(Role::START_MACHINE);
+            $problems = $this->openProblems($order);
+            $this->validate(['protocolResolveTarget' => ['required', Rule::in(array_keys($problems))]]);
+            $target = $this->protocolResolveTarget;
+            $problem = $problems[$target];
+            $note = $this->t('protocol_resolved_note', [
+                'target' => $problem['label'],
+                'problem' => $problem['description'],
+                'solution' => $note,
+            ]);
+        } elseif (in_array($type, ['machine_issue', 'mould_issue', 'other'], true)) {
+            $this->ensurePermission($stop ? Role::STOP_MACHINE : Role::REPORT_EQUIPMENT_WARNING);
+        }
+
+        $this->appendProtocolEntry($order, $order->current_quantity, $type, $note);
+
+        match ($type) {
+            'machine_issue', 'other' => $order->machine?->update([
+                'status' => $stop ? 'stopped' : 'warning',
+                'problem_description' => $note,
+            ]),
+            'mould_issue' => $order->mould?->update([
+                'status' => $stop ? 'needs_repair' : 'warning',
+                'problem_description' => $note,
+            ]),
+            'resolved' => $this->resolveProblem($problem, $target),
+            default => null,
+        };
+
+        if ($type === 'mould_issue' && $stop && $order->mould_id) {
+            $this->pauseOrdersFor('mould_id', $order->mould_id, $note);
+        }
+
+        unset($this->machines);
         $this->protocolEntryNote = '';
+        $this->protocolResolveTarget = '';
+        $this->protocolStopsProduction = false;
         $this->flashMessage = $this->t('protocol_entry_saved');
     }
 
@@ -1082,6 +1003,43 @@ new class extends Component
         };
     }
 
+    /** Restores the equipment and resumes the orders that were paused because of this exact problem. */
+    private function resolveProblem(array $problem, string $target): void
+    {
+        $equipment = $problem['equipment'];
+        $reason = $equipment->problem_description;
+
+        $equipment->update(['status' => 'active', 'problem_description' => null]);
+
+        if ($reason) {
+            Order::query()
+                ->where($target.'_id', $equipment->id)
+                ->where('status', 'paused')
+                ->where('pause_description', $reason)
+                ->update(['status' => 'in_progress', 'pause_description' => null, 'last_paused_at' => null]);
+        }
+    }
+
+    /** Machine/mould of the order that currently carry a warning or fault, keyed by target. */
+    public function openProblems(Order $order): array
+    {
+        $problems = [];
+        $faulty = ['warning', 'stopped', 'broken', 'needs_repair', 'under_repair'];
+
+        foreach (['machine' => $order->machine, 'mould' => $order->mould] as $target => $equipment) {
+            if ($equipment && in_array($equipment->status, $faulty, true)) {
+                $problems[$target] = [
+                    'label' => $this->t('protocol_target_'.$target),
+                    'description' => $equipment->problem_description ?: $this->statusLabel($equipment->status),
+                    'status' => $equipment->status,
+                    'equipment' => $equipment,
+                ];
+            }
+        }
+
+        return $problems;
+    }
+
     private function pauseOrdersFor(string $column, int $id, string $reason): void
     {
         Order::query()->where($column, $id)->where('status', 'in_progress')->each(function (Order $order) use ($reason): void {
@@ -1140,7 +1098,7 @@ new class extends Component
             </form>
         </div>
     @else
-    <header x-data="{ menuOpen: false }" class="sticky top-0 z-40 border-b-4 border-teal-600 bg-white shadow-sm">
+    <header x-data="{ menuOpen: false }" x-init="new ResizeObserver(() => document.documentElement.style.setProperty('--header-h', $el.offsetHeight + 'px')).observe($el)" class="sticky top-0 z-40 border-b-4 border-teal-600 bg-white shadow-sm">
         <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2 sm:px-6">
             <div class="flex items-center gap-3">
                 <button type="button" x-on:click="menuOpen = !menuOpen" x-bind:aria-expanded="menuOpen" aria-label="Menu" class="relative rounded-md border border-slate-300 p-2 text-slate-700 hover:bg-slate-100 md:hidden">
@@ -1204,8 +1162,8 @@ new class extends Component
                     <table class="w-full table-auto border-separate border-spacing-y-1.5 text-left text-[11px] leading-tight [&_td]:break-words [&_td]:px-1.5 [&_th]:px-1.5 [&_th]:align-bottom [&_th]:text-[10px]">
                         <thead class="text-slate-700">
                             <tr>
-                                @foreach (['machine_number', 'type', 'running_product', 'gross_weight', 'net_weight', 'order_number', 'product_code', 'required_quantity', 'current_quantity', 'yesterday_quantity_same_time', 'cavity_count', 'actual_cycle_time', 'utilization_last_24_hours', 'theoretical_daily_production', 'actual_production_last_24_hours', 'color_percentage', 'daily_color_consumption', 'next_activated_order'] as $column)
-                                    <th @class(['bg-slate-200 py-2', 'rounded-l-md' => $loop->first, 'rounded-r-md' => $loop->last]) title="{{ $this->t($column) }}">{{ $this->t(in_array($column, ['type', 'gross_weight', 'net_weight'], true) ? $column : 'col_'.$column) }}</th>
+                                @foreach (['machine_number', 'type', 'running_product', 'gross_weight', 'net_weight', 'order_number', 'product_code', 'required_quantity', 'current_quantity', 'yesterday_quantity_same_time', 'cavity_count', 'actual_cycle_time', 'utilization_last_24_hours', 'theoretical_daily_production', 'actual_production_last_24_hours', 'color_percentage', 'daily_color_consumption', 'next_activated_order', 'production_protocol'] as $column)
+                                    <th @class(['sticky top-[var(--header-h,7rem)] z-30 bg-slate-200 py-2', 'rounded-l-md' => $loop->first, 'rounded-r-md' => $loop->last]) title="{{ $this->t($column) }}">{{ $this->t(in_array($column, ['type', 'gross_weight', 'net_weight', 'production_protocol'], true) ? $column : 'col_'.$column) }}</th>
                                 @endforeach
                             </tr>
                         </thead>
@@ -1222,7 +1180,7 @@ new class extends Component
                                     '[&>td]:bg-red-50 [&>td]:border-red-200 [&>td:first-child]:border-l-red-500' => $state === 'stopped',
                                     '[&>td]:bg-blue-50 [&>td]:border-blue-200 [&>td:first-child]:border-l-blue-500' => $state === 'setup',
                                     '[&>td:first-child]:border-l-slate-300' => $state === 'idle',
-                                ]) wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}">
+                                ]) wire:click="toggleMachineRow({{ $machine->id }})" wire:keydown.enter="toggleMachineRow({{ $machine->id }})" role="button" tabindex="0" aria-expanded="{{ $expandedMachineId === $machine->id ? 'true' : 'false' }}" title="{{ $this->t('open_details') }}">
                                     <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->name }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->type }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order && $this->qualityCheckOverdue($order))<span class="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-black text-white" title="{{ $this->t('quality_check_overdue') }}" aria-label="{{ $this->t('quality_check_overdue') }}">!</span>@endif{{ $order?->product?->name ?? '-' }}</td>
@@ -1240,7 +1198,7 @@ new class extends Component
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->producedLast24Hours() ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_color_percentage !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('color_percentage')]) title="{{ $this->t('theoretical') }}: {{ $order?->color_percentage === null ? '-' : number_format((float) $order->color_percentage, 2, ',', ' ').'%' }}">{{ number_format((float) $order->measured_color_percentage, 2, ',', ' ') }}%</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->color_percentage === null ? '-' : number_format((float) $order->color_percentage, 2, ',', ' ').'%' }}</span>@endif</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ ($colorConsumption = $metrics->dailyColorConsumptionKg($order)) === null ? '-' : number_format($colorConsumption, 3, ',', ' ') }}</td>
-                                    <td class="rounded-r-md border-y border-r border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">
                                         @if ($nextOrder)
                                             <span class="block font-semibold">{{ $nextOrder->order_number }}</span>
                                             <span class="block">{{ $nextOrder->product?->code ?? $nextOrder->product?->name }}</span>
@@ -1248,12 +1206,34 @@ new class extends Component
                                             -
                                         @endif
                                     </td>
+                                    <td class="rounded-r-md border-y border-r border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">
+                                        @if ($order)
+                                            <button wire:click.stop="openProductionProtocol({{ $order->id }})" class="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-100">{{ $this->t('production_protocol') }}</button>
+                                        @else
+                                            -
+                                        @endif
+                                    </td>
                                 </tr>
+                                @if ($expandedMachineId === $machine->id && ($expanded = $this->expandedMachine))
+                                    <tr wire:key="machine-expanded-{{ $machine->id }}">
+                                        <td colspan="19" class="p-0">
+                                            <div x-data="{ show: false }" x-init="$nextTick(() => show = true)" x-show="show" x-cloak
+                                                x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="-translate-y-2 opacity-0" x-transition:enter-end="translate-y-0 opacity-100"
+                                                class="rounded-md border border-teal-200 border-l-4 border-l-teal-600 bg-slate-50 p-4 shadow-inner">
+                                                <div class="mb-3 flex items-center justify-between gap-3">
+                                                    <h3 class="text-base font-bold text-slate-900">{{ $expanded->name }} <span class="font-normal text-slate-500">· {{ $expanded->type }}</span></h3>
+                                                    <button type="button" wire:click="toggleMachineRow({{ $machine->id }})" class="rounded-md px-2.5 py-1 text-xl leading-none text-slate-500 hover:bg-slate-200 hover:text-slate-800" aria-label="{{ $this->t('close') }}">&times;</button>
+                                                </div>
+                                                @include('partials.machine-detail-body', ['detail' => $expanded, 'inline' => true])
+                                            </div>
+                                        </td>
+                                    </tr>
+                                @endif
                             </tbody>
                         @empty
                             <tbody>
                                 <tr>
-                                    <td colspan="18" class="rounded-md bg-white p-8 text-center text-slate-500">{{ $this->t('no_machines') }}</td>
+                                    <td colspan="19" class="rounded-md bg-white p-8 text-center text-slate-500">{{ $this->t('no_machines') }}</td>
                                 </tr>
                             </tbody>
                         @endforelse
@@ -1444,9 +1424,6 @@ new class extends Component
                             <dl class="mt-4 space-y-2 text-sm"><div class="flex justify-between"><dt class="text-slate-500">{{ $this->t('number') }}</dt><dd>{{ $mould->number }}</dd></div><div class="flex justify-between"><dt class="text-slate-500">{{ $this->t('cavity_count') }}</dt><dd>{{ $mould->cavity_count ?? '-' }}</dd></div><div class="flex justify-between"><dt class="text-slate-500">{{ $this->t('opening') }}</dt><dd>{{ $mould->open_mm ?? '-' }} mm</dd></div></dl>
                             @if ($mould->products->isNotEmpty())<p class="mt-4 text-sm text-slate-600"><strong>{{ $this->t('product') }}:</strong> {{ $mould->products->pluck('name')->join(', ') }}</p>@endif
                             @if ($mould->problem_description)<p class="mt-3 text-sm text-red-700">{{ $mould->problem_description }}</p>@endif
-                            @if ($this->isAdmin() || $this->canDo(\App\Enums\Role::REPORT_EQUIPMENT_WARNING))
-                                <button wire:click="openMouldModal({{ $mould->id }})" class="mt-5 w-full rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t('change_status') }}</button>
-                            @endif
                         </article>
                     @empty
                         <p class="rounded-xl bg-white p-8 text-center text-slate-500 md:col-span-2 xl:col-span-3">{{ $this->t('no_moulds') }}</p>
@@ -1472,11 +1449,6 @@ new class extends Component
 
     @include('partials.footer')
     @if ($detailMachineId && ($detail = $this->detailMachine))
-        @php($detailMetrics = $detail->productionMetrics())
-        @php($detailOrder = $detailMetrics->currentOrder() ?? $detailMetrics->nextActivatedOrder())
-        @php($detailNextOrder = $detailMetrics->nextActivatedOrder())
-        @php($detailNextOrder = $detailNextOrder?->is($detailOrder) ? null : $detailNextOrder)
-        @php($detailMould = $detailOrder?->mould)
         <div wire:key="machine-detail-{{ $detail->id }}" wire:click.self="closeMachineDetail" class="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 sm:items-center sm:p-4">
             <div class="flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:rounded-xl">
                 <div class="flex items-start justify-between gap-3 border-b-4 border-teal-600 px-5 py-4">
@@ -1488,156 +1460,8 @@ new class extends Component
                 </div>
 
                 <div class="space-y-4 overflow-y-auto p-4 sm:p-5">
-                    <section class="rounded-lg border border-slate-200 p-4">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h3 class="font-bold text-slate-900">{{ $this->t('machine_details') }}</h3>
-                            <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($detail->status)])>{{ $this->statusLabel($detail->status) }}</span>
-                        </div>
-                        <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-                            <div><dt class="text-slate-500">{{ $this->t('type') }}</dt><dd class="font-semibold">{{ $detail->type }}</dd></div>
-                            <div><dt class="text-slate-500">{{ $this->t('opening') }}</dt><dd class="font-semibold">{{ $detail->open_mm ?? '-' }} mm</dd></div>
-                            <div><dt class="text-slate-500">{{ $this->t('screw_diameter') }}</dt><dd class="font-semibold">{{ $detail->screw_diameter_cm ?? '-' }} cm</dd></div>
-                        </dl>
-                        @if ($detail->problem_description)
-                            <p class="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{ $detail->problem_description }}</p>
-                        @endif
-                        @if ($this->canDo(\App\Enums\Role::START_MACHINE) || $this->canDo(\App\Enums\Role::STOP_MACHINE) || $this->canDo(\App\Enums\Role::REPORT_EQUIPMENT_WARNING))
-                            <button wire:click="openMachineModal({{ $detail->id }})" class="mt-4 rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t('change_machine_status') }}</button>
-                        @endif
-                    </section>
-
-                    <section class="rounded-lg border border-slate-200 p-4">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h3 class="font-bold text-slate-900">{{ $this->t('mounted_mould') }}</h3>
-                            @if ($detailMould)
-                                <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($detailMould->status)])>{{ $this->statusLabel($detailMould->status) }}</span>
-                            @endif
-                        </div>
-                        @if ($detailMould)
-                            <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-                                <div class="col-span-2"><dt class="text-slate-500">{{ $this->t('moulds') }}</dt><dd class="font-semibold">{{ $detailMould->name }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('number') }}</dt><dd class="font-semibold">{{ $detailMould->number ?? '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('cavity_count') }}</dt><dd class="font-semibold">{{ $detailMould->cavity_count ?? '-' }}</dd></div>
-                            </dl>
-                            @if ($detailMould->problem_description)
-                                <p class="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{ $detailMould->problem_description }}</p>
-                            @endif
-                            @if ($this->isAdmin() || $this->canDo(\App\Enums\Role::REPORT_EQUIPMENT_WARNING))
-                                <button wire:click="openMouldModal({{ $detailMould->id }})" class="mt-4 rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t('change_mould_status') }}</button>
-                            @endif
-                        @else
-                            <p class="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-500">{{ $this->t('no_mounted_mould') }}</p>
-                        @endif
-                        @if ($detail->moulds->isNotEmpty())
-                            <p class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ $this->t('compatible_moulds') }}</p>
-                            <div class="mt-2 flex flex-wrap gap-2">
-                                @foreach ($detail->moulds as $compatible)
-                                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700">{{ $compatible->name }}</span>
-                                @endforeach
-                            </div>
-                        @endif
-                    </section>
-
-                    <section class="rounded-lg border border-teal-100 bg-teal-50 p-4">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h3 class="font-bold text-teal-950">{{ $this->t('order_details') }}</h3>
-                            @if ($detailOrder)
-                                <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($detailOrder->status)])>{{ $this->statusLabel($detailOrder->status) }}</span>
-                            @endif
-                        </div>
-                        @if ($detailOrder)
-                            @php($lastQualityCheck = $this->lastQualityCheckAt($detailOrder))
-                            <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-                                <div><dt class="text-slate-500">{{ $this->t('order_number') }}</dt><dd class="font-semibold">{{ $detailOrder->order_number }}</dd></div>
-                                <div class="col-span-2"><dt class="text-slate-500">{{ $this->t('product') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->name ?? '-' }} <span class="font-normal text-slate-500">{{ $detailOrder->product?->code }}</span></dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('customer') }}</dt><dd class="font-semibold">{{ $detailOrder->customer }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('required_quantity') }}</dt><dd class="font-semibold">{{ number_format($detailOrder->quantity, 0, ',', ' ') }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('actual_cycle') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->cycle_time ? number_format($detailOrder->cycle_time / 1000, 2, ',', ' ').' s' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('cycle_time')])>{{ $detailOrder->measured_cycle_time ? number_format($detailOrder->measured_cycle_time / 1000, 2, ',', ' ').' s' : '-' }}</span></dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('net_weight') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->net_weight !== null ? $detailOrder->net_weight.' g' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('net_weight')])>{{ $detailOrder->measured_net_weight !== null ? $detailOrder->measured_net_weight.' g' : '-' }}</span></dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('gross_weight') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->gross_weight !== null ? $detailOrder->gross_weight.' g' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('gross_weight')])>{{ $detailOrder->measured_gross_weight !== null ? $detailOrder->measured_gross_weight.' g' : '-' }}</span></dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('color_percentage') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->color_percentage !== null ? number_format((float) $detailOrder->color_percentage, 2, ',', ' ').'%' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('color_percentage')])>{{ $detailOrder->measured_color_percentage !== null ? number_format((float) $detailOrder->measured_color_percentage, 2, ',', ' ').'%' : '-' }}</span></dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('yesterday_quantity_same_time') }}</dt><dd class="font-semibold">{{ $detailMetrics->quantityAtYesterdaySameTime($detailOrder) ?? '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('planned_start') }}</dt><dd class="font-semibold">{{ $detailOrder->date?->format('Y-m-d') ?? '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('actual_start') }}</dt><dd class="font-semibold">{{ $this->productionStartedAt($detailOrder)?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('planned_end') }}</dt><dd class="font-semibold">{{ $detailOrder->planned_end_date?->format('Y-m-d') ?? '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('actual_end') }}</dt><dd class="font-semibold">{{ $detailOrder->ended_at?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-' }}</dd></div>
-                            </dl>
-                            <dl class="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-white/80 p-3 text-sm sm:grid-cols-4">
-                                <div><dt class="text-slate-500">{{ $this->t('utilization_last_24_hours') }}</dt><dd class="font-semibold">{{ ($utilization = $detailMetrics->utilizationLast24Hours($detailOrder)) === null ? '-' : number_format($utilization, 1, ',', ' ').'%' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('theoretical_daily_production') }}</dt><dd class="font-semibold">{{ $detailMetrics->theoreticalDailyProduction($detailOrder) ?? '-' }} db</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('actual_production_last_24_hours') }}</dt><dd class="font-semibold">{{ $detailMetrics->producedLast24Hours() ?? '-' }} db</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('daily_color_consumption') }}</dt><dd class="font-semibold">{{ ($consumption = $detailMetrics->dailyColorConsumptionKg($detailOrder)) === null ? '-' : number_format($consumption, 3, ',', ' ').' kg' }}</dd></div>
-                            </dl>
-                            @if ($detailOrder->product?->material || $detailOrder->product?->color || $detailOrder->product?->additives?->isNotEmpty())
-                                <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
-                                    <div><dt class="text-slate-500">{{ $this->t('material') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->material?->name ?? '-' }}</dd></div>
-                                    <div><dt class="text-slate-500">{{ $this->t('color') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->color?->name ?? '-' }}</dd></div>
-                                    <div class="col-span-2"><dt class="text-slate-500">{{ $this->t('additives') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->additives?->pluck('name')->join(', ') ?: '-' }}</dd></div>
-                                </dl>
-                            @endif
-                            <div class="mt-4 flex justify-between text-sm"><span>{{ $this->t('current_quantity') }}</span><strong>{{ $detailOrder->current_quantity }} / {{ $detailOrder->quantity }} db</strong></div>
-                            @include('partials.production-progress-bar', ['order' => $detailOrder])
-                            <div class="mt-3">
-                                <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($this->qualityStatus($detailOrder))])>{{ $this->t('quality') }}: {{ $this->statusLabel($this->qualityStatus($detailOrder)) }}</span>
-                                <p @class(['mt-2 text-xs font-medium', 'text-red-700' => $this->qualityCheckOverdue($detailOrder), 'text-slate-600' => ! $this->qualityCheckOverdue($detailOrder)])>
-                                    {{ $lastQualityCheck ? $this->t('last_quality_check_at', ['time' => $lastQualityCheck->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i:s')]) : $this->t('no_quality_check_yet') }}
-                                </p>
-                                @if ($this->qualityCheckOverdue($detailOrder))
-                                    <p class="mt-1 text-xs font-bold text-red-700">{{ $this->t('quality_check_overdue') }}</p>
-                                @endif
-                            </div>
-                            @if ($detailOrder->pause_description && $detailOrder->status === 'paused')
-                                <p class="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-800"><strong>{{ $this->t('pause_reason') }}:</strong> {{ $detailOrder->pause_description }}</p>
-                            @endif
-                            <div class="mt-4 flex flex-wrap gap-2">
-                                @if ($this->canManageOrders())
-                                    <button wire:click="openOrderModal({{ $detailOrder->id }})" class="rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t('manage_order') }}</button>
-                                @endif
-                                @if ($this->canEnterMeasuredData())
-                                    <button wire:click="openMeasuredModal({{ $detailOrder->id }})" class="rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">{{ $this->t('measured_data') }}</button>
-                                @endif
-                                @if ($this->canCheckQuality() && ! $detailOrder->hasMeasuredData())
-                                    <p class="w-full rounded-md bg-amber-50 p-2 text-xs font-semibold text-amber-800">{{ $this->t('measured_data_required') }}</p>
-                                @elseif ($this->canCheckQuality())
-                                    <button wire:click="openQualityModal({{ $detailOrder->id }})" class="rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">{{ $this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'color_check' : 'quality_check') }}</button>
-                                @endif
-                                <button wire:click="openProductionProtocol({{ $detailOrder->id }})" class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">{{ $this->t('production_protocol') }}</button>
-                            </div>
-                        @else
-                            <p class="mt-3 rounded-lg bg-white p-3 text-sm text-slate-500">{{ $this->t('no_running_order') }}</p>
-                        @endif
-                        @if ($detailNextOrder)
-                            <div class="mt-4 rounded-lg bg-white/80 p-3 text-sm">
-                                <h4 class="font-semibold">{{ $this->t('next_activated_order') }}</h4>
-                                <p class="mt-1">{{ $detailNextOrder->order_number }} · {{ $detailNextOrder->customer }} · {{ $detailNextOrder->product?->code ?? $detailNextOrder->product?->name }}</p>
-                            </div>
-                        @endif
-                        @if ($detailMetrics->waitingOrders()->isNotEmpty())
-                            <div class="mt-3 rounded-lg bg-white/80 p-3 text-sm">
-                                <h4 class="font-semibold">{{ $this->t('waiting_orders') }}</h4>
-                                <ul class="mt-1 list-inside list-disc">
-                                    @foreach ($detailMetrics->waitingOrders() as $waitingOrder)
-                                        <li>{{ $waitingOrder->order_number }} · {{ $waitingOrder->customer }} · {{ $waitingOrder->product?->code ?? $waitingOrder->product?->name }}</li>
-                                    @endforeach
-                                </ul>
-                            </div>
-                        @endif
-                    </section>
+                    @include('partials.machine-detail-body', ['detail' => $detail])
                 </div>
-            </div>
-        </div>
-    @endif
-
-    @if ($showMachineModal || $showMouldModal)
-        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
-            <div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
-                <h2 class="text-xl font-bold">{{ $showMachineModal ? $this->t('machines').' '.$this->t('change_status') : $this->t('moulds').' '.$this->t('change_status') }}</h2>
-                <div class="mt-5 space-y-4">
-                    <label class="block text-sm font-semibold">{{ $this->t('new_status') }}<select wire:model.live="status" class="mt-1 w-full rounded-md border-slate-300">@if ($showMachineModal)<option value="" disabled>{{ $this->t('select_status') }}</option>@if ($this->canDo(\App\Enums\Role::START_MACHINE))<option value="active">{{ $this->t('active') }}</option>@endif @if ($this->canDo(\App\Enums\Role::STOP_MACHINE))<option value="stopped">{{ $this->t('stopped') }}</option>@endif @if ($this->canDo(\App\Enums\Role::REPORT_EQUIPMENT_WARNING))<option value="warning">{{ $this->t('warning') }}</option>@endif @if ($this->isAdmin())<option value="broken">{{ $this->t('broken') }}</option>@endif @else @if ($this->isAdmin())<option value="active">{{ $this->t('active') }}</option><option value="standby">{{ $this->t('standby') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="needs_repair">{{ $this->t('needs_repair') }}</option><option value="under_repair">{{ $this->t('under_repair') }}</option>@else<option value="" disabled>{{ $this->t('select_status') }}</option><option value="active">{{ $this->t('active') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="needs_repair">{{ $this->t('needs_repair') }}</option>@endif @endif</select></label>
-                    @if (in_array($status, ['warning', 'broken', 'needs_repair', 'stopped'], true))<label class="block text-sm font-semibold">{{ $this->t('problem_description') }}<textarea wire:model="problemDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('problemDescription')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>@endif
-                    @if ($this->requiresResolution())<label class="block text-sm font-semibold">{{ $this->t('resolution_description') }}<textarea wire:model="resolutionDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('resolutionDescription')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>@endif
-                </div>
-                <div class="mt-6 flex justify-end gap-3"><button wire:click="$set('{{ $showMachineModal ? 'showMachineModal' : 'showMouldModal' }}', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="{{ $showMachineModal ? 'saveMachineStatus' : 'saveMouldStatus' }}" wire:loading.attr="disabled" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('save') }}</button></div>
             </div>
         </div>
     @endif
@@ -1735,12 +1559,36 @@ new class extends Component
                         <h3 class="font-bold">{{ $this->t('add_protocol_entry') }}</h3>
                         <div class="mt-3 grid gap-3">
                             <label class="text-sm font-semibold">{{ $this->t('protocol_entry_type') }}
-                                <select wire:model="protocolEntryType" class="mt-1 w-full rounded-md border-slate-300">
-                                    @foreach (['note', 'parameter_change', 'machine_issue', 'mould_issue', 'other'] as $type)
+                                <select wire:model.live="protocolEntryType" class="mt-1 w-full rounded-md border-slate-300">
+                                    @php($openProblems = $this->openProblems($protocolOrder))
+                                    @foreach (['note', 'parameter_change', 'machine_issue', 'mould_issue', 'other', 'resolved'] as $type)
+                                        @continue($type === 'resolved' && (empty($openProblems) || ! $this->canDo(\App\Enums\Role::START_MACHINE)))
                                         <option value="{{ $type }}">{{ $this->t('protocol_type_'.$type) }}</option>
                                     @endforeach
                                 </select>
                             </label>
+                            @if ($protocolEntryType === 'resolved' && ! empty($openProblems))
+                                <fieldset class="grid gap-2">
+                                    <legend class="text-sm font-semibold">{{ $this->t('protocol_resolve_which') }}</legend>
+                                    @foreach ($openProblems as $target => $problem)
+                                        <label class="flex items-start gap-2 rounded-md border border-slate-200 p-2 text-sm">
+                                            <input type="radio" wire:model="protocolResolveTarget" value="{{ $target }}" class="mt-1">
+                                            <span>
+                                                <span @class(['rounded-full px-2 py-0.5 text-xs font-bold', $this->statusClass($problem['status'])])>{{ $problem['label'] }} · {{ $this->statusLabel($problem['status']) }}</span>
+                                                <span class="mt-1 block text-slate-700">{{ $problem['description'] }}</span>
+                                            </span>
+                                        </label>
+                                    @endforeach
+                                    @error('protocolResolveTarget')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
+                                </fieldset>
+                            @endif
+                            @if (in_array($protocolEntryType, ['machine_issue', 'mould_issue', 'other'], true))
+                                <label class="flex items-center gap-2 text-sm font-semibold">
+                                    <input type="checkbox" wire:model="protocolStopsProduction" class="rounded border-slate-300">
+                                    {{ $this->t('protocol_stops_production') }}
+                                </label>
+                                <p class="-mt-2 text-xs text-slate-500">{{ $this->t('protocol_stops_production_hint') }}</p>
+                            @endif
                             <label class="text-sm font-semibold">{{ $this->t('protocol_entry_note') }}
                                 <textarea wire:model="protocolEntryNote" rows="3" maxlength="2000" class="mt-1 w-full rounded-md border-slate-300"></textarea>
                                 @error('protocolEntryNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror

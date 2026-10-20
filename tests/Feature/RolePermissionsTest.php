@@ -22,7 +22,7 @@ class RolePermissionsTest extends TestCase
     {
         $this->assertSame([Role::PERMISSION_ALL], Role::Admin->permissions());
         $this->assertSame([Role::ACTIVATE_ORDER, Role::PAUSE_ORDER, Role::INTERRUPT_ORDER], Role::Programmer->permissions());
-        $this->assertSame([Role::ASSIGN_ORDER, Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHECK_QUALITY, Role::ENTER_MEASURED_DATA], Role::Coordinator->permissions());
+        $this->assertSame([Role::ASSIGN_ORDER, Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHECK_QUALITY, Role::CHECK_COLOR, Role::ENTER_MEASURED_DATA], Role::Coordinator->permissions());
         $this->assertSame([Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHECK_COLOR, Role::ENTER_MEASURED_DATA], Role::Operator->permissions());
         $this->assertSame([Role::CHECK_QUALITY, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING], Role::QualityManager->permissions());
     }
@@ -132,6 +132,20 @@ class RolePermissionsTest extends TestCase
             ->assertDontSee('Operátori feladatkiosztás');
     }
 
+    public function test_coordinator_can_be_assigned_a_task_and_start_it_like_an_operator(): void
+    {
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $order = Order::factory()->create(['status' => 'in_progress', 'assigned_operator_id' => $coordinator->id]);
+
+        Livewire::actingAs($coordinator)
+            ->test('production-dashboard')
+            ->call('selectTab', 'tasks')
+            ->assertSee($order->order_number)
+            ->call('startAssignedTask', $order->id);
+
+        $this->assertSame('setup', $order->machine->fresh()->status);
+    }
+
     public function test_operator_starts_only_an_assigned_active_task_and_machine_enters_setup(): void
     {
         $operator = User::factory()->create(['role' => Role::Operator]);
@@ -212,6 +226,21 @@ class RolePermissionsTest extends TestCase
 
         $this->assertNull($component->instance()->expectedQuantity($order->load(['mould', 'product'])));
         $component->assertDontSee('Elméleti mennyiség:');
+    }
+
+    public function test_machine_row_expands_inline_with_details(): void
+    {
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $order = Order::factory()->create(['status' => 'in_progress', 'order_number' => 'ORD-EXPAND']);
+
+        Livewire::actingAs($coordinator)
+            ->test('production-dashboard')
+            ->call('toggleMachineRow', $order->machine_id)
+            ->assertSet('expandedMachineId', $order->machine_id)
+            ->assertSet('detailMachineId', null)
+            ->assertSee('ORD-EXPAND')
+            ->call('toggleMachineRow', $order->machine_id)
+            ->assertSet('expandedMachineId', null);
     }
 
     public function test_measured_data_gates_quality_check_and_flags_deviations(): void
@@ -393,27 +422,6 @@ class RolePermissionsTest extends TestCase
         $this->assertSame('color', $order->fresh()->production_protocol['quality_checks'][0]['check_type']);
     }
 
-    public function test_coordinator_and_operator_can_set_machine_statuses(): void
-    {
-        foreach ([Role::Coordinator, Role::Operator] as $role) {
-            $user = User::factory()->create(['role' => $role]);
-            $machine = Machine::factory()->create(['status' => 'stopped']);
-
-            foreach (['active', 'warning', 'stopped'] as $status) {
-                Livewire::actingAs($user)
-                    ->test('production-dashboard')
-                    ->call('openMachineModal', $machine->id)
-                    ->set('status', $status)
-                    ->set('problemDescription', $status === 'active' ? '' : 'Reason: '.$status)
-                    ->set('resolutionDescription', 'Elhárítva')
-                    ->call('saveMachineStatus')
-                    ->assertHasNoErrors();
-
-                $this->assertSame($status, $machine->fresh()->status);
-            }
-        }
-    }
-
     public function test_machine_card_shows_the_mould_warning_text(): void
     {
         $user = User::factory()->create(['role' => Role::Operator]);
@@ -425,90 +433,6 @@ class RolePermissionsTest extends TestCase
             ->test('production-dashboard')
             ->call('openMachineDetail', $machine->id)
             ->assertSee('Kidobó csap kopott');
-    }
-
-    public function test_machine_card_shows_good_for_active_and_the_entered_reason_for_stopped(): void
-    {
-        $user = User::factory()->create(['role' => Role::Operator]);
-        $machine = Machine::factory()->create(['status' => 'active']);
-
-        Livewire::actingAs($user)
-            ->test('production-dashboard')
-            ->call('openMachineDetail', $machine->id)
-            ->call('openMachineModal', $machine->id)
-            ->set('status', 'stopped')
-            ->call('saveMachineStatus')
-            ->assertHasErrors(['problemDescription' => 'required'])
-            ->set('problemDescription', 'Hidraulika olajszint alacsony')
-            ->call('saveMachineStatus')
-            ->assertHasNoErrors()
-            ->assertSee('Hidraulika olajszint alacsony');
-
-        $this->assertSame('Hidraulika olajszint alacsony', $machine->fresh()->problem_description);
-    }
-
-    public function test_restarting_a_stopped_machine_requires_a_resolution_and_logs_both_texts(): void
-    {
-        $user = User::factory()->create(['role' => Role::Operator]);
-        $machine = Machine::factory()->create(['status' => 'active']);
-        $order = Order::factory()->create(['machine_id' => $machine->id, 'status' => 'in_progress']);
-
-        Livewire::actingAs($user)
-            ->test('production-dashboard')
-            ->call('openMachineModal', $machine->id)
-            ->set('status', 'stopped')
-            ->set('problemDescription', 'Olajszint alacsony')
-            ->call('saveMachineStatus')
-            ->call('openMachineModal', $machine->id)
-            ->set('status', 'active')
-            ->call('saveMachineStatus')
-            ->assertHasErrors(['resolutionDescription' => 'required'])
-            ->set('resolutionDescription', 'Olaj utántöltve')
-            ->call('saveMachineStatus')
-            ->assertHasNoErrors();
-
-        $notes = collect($order->fresh()->production_protocol['entries'])->pluck('note')->implode("\n");
-        $this->assertStringContainsString('Olajszint alacsony', $notes);
-        $this->assertStringContainsString('Olaj utántöltve', $notes);
-        $this->assertSame('active', $machine->fresh()->status);
-    }
-
-    public function test_machine_card_displays_the_saved_machine_status(): void
-    {
-        $operator = User::factory()->create(['role' => Role::Operator]);
-        $machine = Machine::factory()->create(['name' => 'Status test machine', 'status' => 'active']);
-
-        Livewire::actingAs($operator)
-            ->test('production-dashboard')
-            ->call('openMachineDetail', $machine->id)
-            ->assertSee('Aktív')
-            ->call('openMachineModal', $machine->id)
-            ->set('status', 'warning')
-            ->set('problemDescription', 'Scheduled inspection')
-            ->call('saveMachineStatus')
-            ->assertSee('Figyelmeztetés')
-            ->assertSee('bg-amber-100')
-            ->assertSee('Scheduled inspection');
-    }
-
-    public function test_machine_status_changes_are_signed_in_the_active_order_protocol(): void
-    {
-        $operator = User::factory()->create(['name' => 'Signed Operator', 'role' => Role::Operator]);
-        $order = Order::factory()->create(['status' => 'in_progress']);
-
-        Livewire::actingAs($operator)
-            ->test('production-dashboard')
-            ->call('openMachineModal', $order->machine_id)
-            ->set('status', 'warning')
-            ->set('problemDescription', 'Pressure drift')
-            ->call('saveMachineStatus');
-
-        $entry = $order->fresh()->production_protocol['entries'][0];
-        $this->assertSame('machine_status', $entry['entry_type']);
-        $this->assertSame('Signed Operator', $entry['signed_by']);
-        $this->assertSame($operator->id, $entry['signed_by_user_id']);
-        $this->assertStringContainsString('Pressure drift', $entry['note']);
-        $this->assertNotEmpty($entry['timestamp']);
     }
 
     public function test_manual_production_protocol_entries_include_timestamp_and_signature(): void
@@ -534,72 +458,167 @@ class RolePermissionsTest extends TestCase
         $this->assertNotEmpty($entry['timestamp']);
     }
 
-    public function test_quality_manager_can_warn_or_stop_but_not_start_a_machine(): void
+    public function test_protocol_entry_sets_machine_warning_or_stop_with_signed_entry(): void
     {
-        $qualityManager = User::factory()->create(['role' => Role::QualityManager]);
-        $machine = Machine::factory()->create(['status' => 'stopped']);
+        foreach ([Role::Coordinator, Role::Operator, Role::QualityManager] as $role) {
+            $user = User::factory()->create(['name' => 'Signer', 'role' => $role]);
+            $order = Order::factory()->create(['status' => 'in_progress']);
 
-        Livewire::actingAs($qualityManager)
-            ->test('production-dashboard')
-            ->call('openMachineModal', $machine->id)
-            ->set('status', 'active')
-            ->call('saveMachineStatus')
-            ->assertForbidden();
+            foreach ([[false, 'warning'], [true, 'stopped']] as [$stop, $status]) {
+                Livewire::actingAs($user)
+                    ->test('production-dashboard')
+                    ->call('openProductionProtocol', $order->id)
+                    ->set('protocolEntryType', 'machine_issue')
+                    ->set('protocolStopsProduction', $stop)
+                    ->set('protocolEntryNote', 'Reason: '.$status)
+                    ->call('addProductionProtocolEntry')
+                    ->assertHasNoErrors();
 
-        $this->assertSame('stopped', $machine->fresh()->status);
+                $machine = $order->machine->fresh();
+                $this->assertSame($status, $machine->status);
+                $this->assertSame('Reason: '.$status, $machine->problem_description);
+            }
 
-        foreach (['warning', 'stopped'] as $status) {
-            Livewire::actingAs($qualityManager)
-                ->test('production-dashboard')
-                ->call('openMachineModal', $machine->id)
-                ->set('status', $status)
-                ->set('problemDescription', 'Reason: '.$status)
-                ->call('saveMachineStatus')
-                ->assertHasNoErrors();
-
-            $this->assertSame($status, $machine->fresh()->status);
+            $entry = collect($order->fresh()->production_protocol['entries'])->last();
+            $this->assertSame('machine_issue', $entry['entry_type']);
+            $this->assertSame('Signer', $entry['signed_by']);
         }
     }
 
-    public function test_coordinator_operator_and_quality_manager_can_add_mould_warnings_only(): void
+    public function test_resolution_targets_only_the_chosen_problem_and_logs_problem_and_solution(): void
     {
-        foreach ([Role::Coordinator, Role::Operator, Role::QualityManager] as $role) {
-            $user = User::factory()->create(['role' => $role]);
-            $mould = Mould::factory()->create(['status' => 'active']);
-
-            Livewire::actingAs($user)
-                ->test('production-dashboard')
-                ->call('openMouldModal', $mould->id)
-                ->set('status', 'warning')
-                ->set('problemDescription', 'Tool needs inspection')
-                ->call('saveMouldStatus')
-                ->assertHasNoErrors();
-
-            $this->assertSame('warning', $mould->fresh()->status);
-            $this->assertSame('Tool needs inspection', $mould->fresh()->problem_description);
-        }
-
         $operator = User::factory()->create(['role' => Role::Operator]);
-        $mould = Mould::factory()->create(['status' => 'active']);
+        $order = Order::factory()->create(['status' => 'in_progress']);
+        $order->machine->update(['status' => 'stopped', 'problem_description' => 'Olajszint']);
+        $order->mould->update(['status' => 'warning', 'problem_description' => 'Kopott csap']);
 
-        Livewire::actingAs($operator)
+        $component = Livewire::actingAs($operator)
             ->test('production-dashboard')
-            ->call('openMouldModal', $mould->id)
-            ->set('status', 'under_repair')
-            ->call('saveMouldStatus')
-            ->assertForbidden();
-
-        $this->assertSame('active', $mould->fresh()->status);
-
-        Livewire::actingAs($operator)
-            ->test('production-dashboard')
-            ->call('openMouldModal', $mould->id)
-            ->set('status', 'needs_repair')
-            ->set('problemDescription', 'Broken core')
-            ->call('saveMouldStatus')
+            ->call('openProductionProtocol', $order->id)
+            ->set('protocolEntryType', 'resolved')
+            ->assertSee('Olajszint')
+            ->assertSee('Kopott csap')
+            ->set('protocolEntryNote', 'Olaj utántöltve')
+            ->call('addProductionProtocolEntry')
+            ->assertHasErrors('protocolResolveTarget')
+            ->set('protocolResolveTarget', 'machine')
+            ->set('protocolEntryNote', '')
+            ->call('addProductionProtocolEntry')
+            ->assertHasErrors(['protocolEntryNote' => 'required'])
+            ->set('protocolEntryNote', 'Olaj utántöltve')
+            ->call('addProductionProtocolEntry')
             ->assertHasNoErrors();
 
-        $this->assertSame('needs_repair', $mould->fresh()->status);
+        $this->assertSame('active', $order->machine->fresh()->status);
+        $this->assertNull($order->machine->fresh()->problem_description);
+        $this->assertSame('warning', $order->mould->fresh()->status);
+
+        $note = collect($order->fresh()->production_protocol['entries'])->last()['note'];
+        $this->assertStringContainsString('Olajszint', $note);
+        $this->assertStringContainsString('Olaj utántöltve', $note);
+    }
+
+    public function test_resolving_a_mould_stop_resumes_the_paused_order_and_clears_the_pause_reason(): void
+    {
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $order = Order::factory()->create(['status' => 'in_progress']);
+
+        $component = Livewire::actingAs($operator)->test('production-dashboard');
+        $component->call('openProductionProtocol', $order->id)
+            ->set('protocolEntryType', 'mould_issue')
+            ->set('protocolStopsProduction', true)
+            ->set('protocolEntryNote', 'Törött mag')
+            ->call('addProductionProtocolEntry');
+
+        $this->assertSame('paused', $order->fresh()->status);
+        $this->assertSame('Törött mag', $order->fresh()->pause_description);
+
+        $component->set('protocolEntryType', 'resolved')
+            ->set('protocolResolveTarget', 'mould')
+            ->set('protocolEntryNote', 'Mag cserélve')
+            ->call('addProductionProtocolEntry')
+            ->assertHasNoErrors();
+
+        $this->assertSame('in_progress', $order->fresh()->status);
+        $this->assertNull($order->fresh()->pause_description);
+        $this->assertSame('active', $order->mould->fresh()->status);
+    }
+
+    public function test_resolution_option_is_hidden_without_open_problems(): void
+    {
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $order = Order::factory()->create(['status' => 'in_progress']);
+        $order->machine->update(['status' => 'active']);
+        $order->mould->update(['status' => 'active']);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openProductionProtocol', $order->id)
+            ->assertDontSee('Hiba elhárítva');
+
+        $order->machine->update(['status' => 'warning', 'problem_description' => 'Zaj']);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openProductionProtocol', $order->id)
+            ->assertSee('Hiba elhárítva');
+    }
+
+    public function test_quality_manager_cannot_resolve_a_stopped_machine(): void
+    {
+        $qualityManager = User::factory()->create(['role' => Role::QualityManager]);
+        $order = Order::factory()->create(['status' => 'in_progress']);
+        $order->machine->update(['status' => 'stopped']);
+
+        Livewire::actingAs($qualityManager)
+            ->test('production-dashboard')
+            ->call('openProductionProtocol', $order->id)
+            ->set('protocolEntryType', 'resolved')
+            ->set('protocolEntryNote', 'Fixed')
+            ->call('addProductionProtocolEntry')
+            ->assertForbidden();
+
+        $this->assertSame('stopped', $order->machine->fresh()->status);
+    }
+
+    public function test_mould_issue_warns_or_stops_production_and_pauses_orders(): void
+    {
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $order = Order::factory()->create(['status' => 'in_progress']);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openProductionProtocol', $order->id)
+            ->set('protocolEntryType', 'mould_issue')
+            ->set('protocolEntryNote', 'Kopott csap')
+            ->call('addProductionProtocolEntry');
+
+        $this->assertSame('warning', $order->mould->fresh()->status);
+        $this->assertSame('in_progress', $order->fresh()->status);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openProductionProtocol', $order->id)
+            ->set('protocolEntryType', 'mould_issue')
+            ->set('protocolStopsProduction', true)
+            ->set('protocolEntryNote', 'Törött mag')
+            ->call('addProductionProtocolEntry');
+
+        $this->assertSame('needs_repair', $order->mould->fresh()->status);
+        $this->assertSame('paused', $order->fresh()->status);
+    }
+
+    public function test_protocol_modal_shows_stop_checkbox_only_for_issue_types(): void
+    {
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $order = Order::factory()->create(['status' => 'in_progress']);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openProductionProtocol', $order->id)
+            ->assertDontSee('Termelés leállítása')
+            ->set('protocolEntryType', 'machine_issue')
+            ->assertSee('Termelés leállítása');
     }
 
     public function test_programmer_cannot_complete_an_order(): void

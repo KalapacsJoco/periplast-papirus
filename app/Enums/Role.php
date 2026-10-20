@@ -40,7 +40,7 @@ enum Role: string
             self::Programmer => [self::ACTIVATE_ORDER, self::PAUSE_ORDER, self::INTERRUPT_ORDER],
             self::Operator => [self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
             self::QualityManager => [self::CHECK_QUALITY, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING],
-            self::Coordinator => [self::ASSIGN_ORDER, self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_QUALITY, self::ENTER_MEASURED_DATA],
+            self::Coordinator => [self::ASSIGN_ORDER, self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_QUALITY, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
         };
     }
 

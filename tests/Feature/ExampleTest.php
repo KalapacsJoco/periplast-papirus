@@ -85,8 +85,7 @@ class ExampleTest extends TestCase
 
         Livewire::actingAs($admin)->test('production-dashboard')
             ->call('openMachineDetail', $machine->id)
-            ->assertSee('Szerszám státuszának módosítása')
-            ->assertSee('Gép státuszának módosítása');
+            ->assertDontSee('Gép státuszának módosítása');
     }
 
     public function test_machine_state_distinguishes_idle_stopped_and_setup_machines(): void
