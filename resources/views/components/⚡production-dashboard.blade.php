@@ -1204,7 +1204,7 @@ new class extends Component
                     <table class="w-full table-auto border-separate border-spacing-y-1.5 text-left text-[11px] leading-tight [&_td]:break-words [&_td]:px-1.5 [&_th]:px-1.5 [&_th]:align-bottom [&_th]:text-[10px]">
                         <thead class="text-slate-700">
                             <tr>
-                                @foreach (['machine_number', 'type', 'running_product', 'gross_weight', 'net_weight', 'order_number', 'product_code', 'required_quantity', 'current_quantity', 'yesterday_quantity_same_time', 'cavity_count', 'actual_cycle_time', 'database_cycle_time', 'utilization_last_24_hours', 'theoretical_daily_production', 'actual_production_last_24_hours', 'color_percentage', 'daily_color_consumption', 'next_activated_order', 'waiting_orders'] as $column)
+                                @foreach (['machine_number', 'type', 'running_product', 'gross_weight', 'net_weight', 'order_number', 'product_code', 'required_quantity', 'current_quantity', 'yesterday_quantity_same_time', 'cavity_count', 'actual_cycle_time', 'utilization_last_24_hours', 'theoretical_daily_production', 'actual_production_last_24_hours', 'color_percentage', 'daily_color_consumption', 'next_activated_order'] as $column)
                                     <th @class(['bg-slate-200 py-2', 'rounded-l-md' => $loop->first, 'rounded-r-md' => $loop->last]) title="{{ $this->t($column) }}">{{ $this->t(in_array($column, ['type', 'gross_weight', 'net_weight'], true) ? $column : 'col_'.$column) }}</th>
                                 @endforeach
                             </tr>
@@ -1235,13 +1235,12 @@ new class extends Component
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->quantityAtYesterdaySameTime($order) ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->mould?->cavity_count ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_cycle_time !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('cycle_time')]) title="{{ $this->t('theoretical') }}: {{ $order?->cycle_time === null ? '-' : number_format($order->cycle_time / 1000, 2, ',', ' ') }}">{{ number_format($order->measured_cycle_time / 1000, 2, ',', ' ') }}</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->cycle_time === null ? '-' : number_format($order->cycle_time / 1000, 2, ',', ' ') }}</span>@endif</td>
-                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->product?->planned_cycle_time === null ? '-' : number_format($order->product->planned_cycle_time / 1000, 2, ',', ' ') }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ ($utilization = $metrics->utilizationLast24Hours($order)) === null ? '-' : number_format($utilization, 1, ',', ' ').'%' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->theoreticalDailyProduction($order) ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->producedLast24Hours() ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_color_percentage !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('color_percentage')]) title="{{ $this->t('theoretical') }}: {{ $order?->color_percentage === null ? '-' : number_format((float) $order->color_percentage, 2, ',', ' ').'%' }}">{{ number_format((float) $order->measured_color_percentage, 2, ',', ' ') }}%</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->color_percentage === null ? '-' : number_format((float) $order->color_percentage, 2, ',', ' ').'%' }}</span>@endif</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ ($colorConsumption = $metrics->dailyColorConsumptionKg($order)) === null ? '-' : number_format($colorConsumption, 3, ',', ' ') }}</td>
-                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">
+                                    <td class="rounded-r-md border-y border-r border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">
                                         @if ($nextOrder)
                                             <span class="block font-semibold">{{ $nextOrder->order_number }}</span>
                                             <span class="block">{{ $nextOrder->product?->code ?? $nextOrder->product?->name }}</span>
@@ -1249,19 +1248,12 @@ new class extends Component
                                             -
                                         @endif
                                     </td>
-                                    <td class="rounded-r-md border-y border-r border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">
-                                        @forelse ($metrics->waitingOrders() as $waitingOrder)
-                                            <span class="block">{{ $waitingOrder->order_number }} · {{ $waitingOrder->product?->code ?? $waitingOrder->product?->name }}</span>
-                                        @empty
-                                            -
-                                        @endforelse
-                                    </td>
                                 </tr>
                             </tbody>
                         @empty
                             <tbody>
                                 <tr>
-                                    <td colspan="20" class="rounded-md bg-white p-8 text-center text-slate-500">{{ $this->t('no_machines') }}</td>
+                                    <td colspan="18" class="rounded-md bg-white p-8 text-center text-slate-500">{{ $this->t('no_machines') }}</td>
                                 </tr>
                             </tbody>
                         @endforelse
@@ -1270,7 +1262,7 @@ new class extends Component
 
                 <div class="grid gap-4 sm:grid-cols-2 xl:hidden">
                     @forelse ($this->machines->filter(fn ($machine) => $this->machineMatchesFilter($machine, $machineFilter)) as $machine)
-                        @php($order = $machine->orders->first())
+                        @php($order = $machine->productionMetrics()->currentOrder())
                         @php($state = $this->machineState($machine))
                         <article wire:key="machine-card-{{ $machine->id }}" wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}" @class([
                             'cursor-pointer overflow-hidden rounded-xl border shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600',
@@ -1560,7 +1552,6 @@ new class extends Component
                                 <div class="col-span-2"><dt class="text-slate-500">{{ $this->t('product') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->name ?? '-' }} <span class="font-normal text-slate-500">{{ $detailOrder->product?->code }}</span></dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('customer') }}</dt><dd class="font-semibold">{{ $detailOrder->customer }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('required_quantity') }}</dt><dd class="font-semibold">{{ number_format($detailOrder->quantity, 0, ',', ' ') }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('planned_cycle') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->planned_cycle_time ? number_format($detailOrder->product->planned_cycle_time / 1000, 1, ',', ' ').' s' : '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('actual_cycle') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->cycle_time ? number_format($detailOrder->cycle_time / 1000, 2, ',', ' ').' s' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('cycle_time')])>{{ $detailOrder->measured_cycle_time ? number_format($detailOrder->measured_cycle_time / 1000, 2, ',', ' ').' s' : '-' }}</span></dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('net_weight') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->net_weight !== null ? $detailOrder->net_weight.' g' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('net_weight')])>{{ $detailOrder->measured_net_weight !== null ? $detailOrder->measured_net_weight.' g' : '-' }}</span></dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('gross_weight') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->gross_weight !== null ? $detailOrder->gross_weight.' g' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('gross_weight')])>{{ $detailOrder->measured_gross_weight !== null ? $detailOrder->measured_gross_weight.' g' : '-' }}</span></dd></div>
