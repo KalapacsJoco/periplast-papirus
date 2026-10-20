@@ -11,7 +11,6 @@
                             <span @class(['rounded-full px-2 py-0.5 text-xs font-bold', $this->statusClass($detail->status)])>{{ $this->statusLabel($detail->status) }}</span>
                         </div>
                         <dl class="mt-1.5 grid grid-cols-3 gap-2 text-xs">
-                            <div><dt class="text-slate-500">{{ $this->t('type') }}</dt><dd class="font-semibold">{{ $detail->type }}</dd></div>
                             <div><dt class="text-slate-500">{{ $this->t('opening') }}</dt><dd class="font-semibold">{{ $detail->open_mm ?? '-' }} mm</dd></div>
                             <div><dt class="text-slate-500">{{ $this->t('screw_diameter') }}</dt><dd class="font-semibold">{{ $detail->screw_diameter_cm ?? '-' }} cm</dd></div>
                         </dl>
@@ -31,7 +30,6 @@
                             <dl class="mt-1.5 grid grid-cols-4 gap-2 text-xs">
                                 <div class="col-span-2"><dt class="text-slate-500">{{ $this->t('moulds') }}</dt><dd class="font-semibold">{{ $detailMould->name }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('number') }}</dt><dd class="font-semibold">{{ $detailMould->number ?? '-' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('cavity_count') }}</dt><dd class="font-semibold">{{ $detailMould->cavity_count ?? '-' }}</dd></div>
                             </dl>
                             @if ($detailMould->problem_description)
                                 <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{ $detailMould->problem_description }}</p>
@@ -60,26 +58,16 @@
                         </div>
                         @if ($detailOrder)
                             @php($lastQualityCheck = $this->lastQualityCheckAt($detailOrder))
-                            <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-                                <div><dt class="text-slate-500">{{ $this->t('order_number') }}</dt><dd class="font-semibold">{{ $detailOrder->order_number }}</dd></div>
-                                <div class="col-span-2"><dt class="text-slate-500">{{ $this->t('product') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->name ?? '-' }} <span class="font-normal text-slate-500">{{ $detailOrder->product?->code }}</span></dd></div>
+                            <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                                 <div><dt class="text-slate-500">{{ $this->t('customer') }}</dt><dd class="font-semibold">{{ $detailOrder->customer }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('required_quantity') }}</dt><dd class="font-semibold">{{ number_format($detailOrder->quantity, 0, ',', ' ') }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('actual_cycle') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->cycle_time ? number_format($detailOrder->cycle_time / 1000, 2, ',', ' ').' s' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('cycle_time')])>{{ $detailOrder->measured_cycle_time ? number_format($detailOrder->measured_cycle_time / 1000, 2, ',', ' ').' s' : '-' }}</span></dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('net_weight') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->net_weight !== null ? $detailOrder->net_weight.' g' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('net_weight')])>{{ $detailOrder->measured_net_weight !== null ? $detailOrder->measured_net_weight.' g' : '-' }}</span></dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('gross_weight') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->gross_weight !== null ? $detailOrder->gross_weight.' g' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('gross_weight')])>{{ $detailOrder->measured_gross_weight !== null ? $detailOrder->measured_gross_weight.' g' : '-' }}</span></dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('color_percentage') }} ({{ $this->t('theoretical') }} / {{ $this->t('measured') }})</dt><dd class="font-semibold">{{ $detailOrder->color_percentage !== null ? number_format((float) $detailOrder->color_percentage, 2, ',', ' ').'%' : '-' }} / <span @class(['text-red-600' => $detailOrder->measuredDeviates('color_percentage')])>{{ $detailOrder->measured_color_percentage !== null ? number_format((float) $detailOrder->measured_color_percentage, 2, ',', ' ').'%' : '-' }}</span></dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('yesterday_quantity_same_time') }}</dt><dd class="font-semibold">{{ $detailMetrics->quantityAtYesterdaySameTime($detailOrder) ?? '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('planned_start') }}</dt><dd class="font-semibold">{{ $detailOrder->date?->format('Y-m-d') ?? '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('actual_start') }}</dt><dd class="font-semibold">{{ $this->productionStartedAt($detailOrder)?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('planned_end') }}</dt><dd class="font-semibold">{{ $detailOrder->planned_end_date?->format('Y-m-d') ?? '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('actual_end') }}</dt><dd class="font-semibold">{{ $detailOrder->ended_at?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-' }}</dd></div>
-                            </dl>
-                            <dl class="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-white/80 p-3 text-sm sm:grid-cols-4">
-                                <div><dt class="text-slate-500">{{ $this->t('utilization_last_24_hours') }}</dt><dd class="font-semibold">{{ ($utilization = $detailMetrics->utilizationLast24Hours($detailOrder)) === null ? '-' : number_format($utilization, 1, ',', ' ').'%' }}</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('theoretical_daily_production') }}</dt><dd class="font-semibold">{{ $detailMetrics->theoreticalDailyProduction($detailOrder) ?? '-' }} db</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('actual_production_last_24_hours') }}</dt><dd class="font-semibold">{{ $detailMetrics->producedLast24Hours() ?? '-' }} db</dd></div>
-                                <div><dt class="text-slate-500">{{ $this->t('daily_color_consumption') }}</dt><dd class="font-semibold">{{ ($consumption = $detailMetrics->dailyColorConsumptionKg($detailOrder)) === null ? '-' : number_format($consumption, 3, ',', ' ').' kg' }}</dd></div>
                             </dl>
                             @if ($detailOrder->product?->material || $detailOrder->product?->color || $detailOrder->product?->additives?->isNotEmpty())
                                 <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
@@ -88,7 +76,6 @@
                                     <div class="col-span-2"><dt class="text-slate-500">{{ $this->t('additives') }}</dt><dd class="font-semibold">{{ $detailOrder->product?->additives?->pluck('name')->join(', ') ?: '-' }}</dd></div>
                                 </dl>
                             @endif
-                            <div class="mt-4 flex justify-between text-sm"><span>{{ $this->t('current_quantity') }}</span><strong>{{ $detailOrder->current_quantity }} / {{ $detailOrder->quantity }} db</strong></div>
                             @include('partials.production-progress-bar', ['order' => $detailOrder])
                             <div class="mt-3">
                                 <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($this->qualityStatus($detailOrder))])>{{ $this->t('quality') }}: {{ $this->statusLabel($this->qualityStatus($detailOrder)) }}</span>

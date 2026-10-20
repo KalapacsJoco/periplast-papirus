@@ -11,7 +11,6 @@
                             <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['rounded-full px-2 py-0.5 text-xs font-bold', $this->statusClass($detail->status)]); ?>"><?php echo e($this->statusLabel($detail->status)); ?></span>
                         </div>
                         <dl class="mt-1.5 grid grid-cols-3 gap-2 text-xs">
-                            <div><dt class="text-slate-500"><?php echo e($this->t('type')); ?></dt><dd class="font-semibold"><?php echo e($detail->type); ?></dd></div>
                             <div><dt class="text-slate-500"><?php echo e($this->t('opening')); ?></dt><dd class="font-semibold"><?php echo e($detail->open_mm ?? '-'); ?> mm</dd></div>
                             <div><dt class="text-slate-500"><?php echo e($this->t('screw_diameter')); ?></dt><dd class="font-semibold"><?php echo e($detail->screw_diameter_cm ?? '-'); ?> cm</dd></div>
                         </dl>
@@ -31,7 +30,6 @@
                             <dl class="mt-1.5 grid grid-cols-4 gap-2 text-xs">
                                 <div class="col-span-2"><dt class="text-slate-500"><?php echo e($this->t('moulds')); ?></dt><dd class="font-semibold"><?php echo e($detailMould->name); ?></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('number')); ?></dt><dd class="font-semibold"><?php echo e($detailMould->number ?? '-'); ?></dd></div>
-                                <div><dt class="text-slate-500"><?php echo e($this->t('cavity_count')); ?></dt><dd class="font-semibold"><?php echo e($detailMould->cavity_count ?? '-'); ?></dd></div>
                             </dl>
                             <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMould->problem_description): ?>
                                 <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong><?php echo e($this->t('problem')); ?>:</strong> <?php echo e($detailMould->problem_description); ?></p>
@@ -60,26 +58,16 @@
                         </div>
                         <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailOrder): ?>
                             <?php ($lastQualityCheck = $this->lastQualityCheckAt($detailOrder)); ?>
-                            <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-                                <div><dt class="text-slate-500"><?php echo e($this->t('order_number')); ?></dt><dd class="font-semibold"><?php echo e($detailOrder->order_number); ?></dd></div>
-                                <div class="col-span-2"><dt class="text-slate-500"><?php echo e($this->t('product')); ?></dt><dd class="font-semibold"><?php echo e($detailOrder->product?->name ?? '-'); ?> <span class="font-normal text-slate-500"><?php echo e($detailOrder->product?->code); ?></span></dd></div>
+                            <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                                 <div><dt class="text-slate-500"><?php echo e($this->t('customer')); ?></dt><dd class="font-semibold"><?php echo e($detailOrder->customer); ?></dd></div>
-                                <div><dt class="text-slate-500"><?php echo e($this->t('required_quantity')); ?></dt><dd class="font-semibold"><?php echo e(number_format($detailOrder->quantity, 0, ',', ' ')); ?></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('actual_cycle')); ?> (<?php echo e($this->t('theoretical')); ?> / <?php echo e($this->t('measured')); ?>)</dt><dd class="font-semibold"><?php echo e($detailOrder->cycle_time ? number_format($detailOrder->cycle_time / 1000, 2, ',', ' ').' s' : '-'); ?> / <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['text-red-600' => $detailOrder->measuredDeviates('cycle_time')]); ?>"><?php echo e($detailOrder->measured_cycle_time ? number_format($detailOrder->measured_cycle_time / 1000, 2, ',', ' ').' s' : '-'); ?></span></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('net_weight')); ?> (<?php echo e($this->t('theoretical')); ?> / <?php echo e($this->t('measured')); ?>)</dt><dd class="font-semibold"><?php echo e($detailOrder->net_weight !== null ? $detailOrder->net_weight.' g' : '-'); ?> / <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['text-red-600' => $detailOrder->measuredDeviates('net_weight')]); ?>"><?php echo e($detailOrder->measured_net_weight !== null ? $detailOrder->measured_net_weight.' g' : '-'); ?></span></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('gross_weight')); ?> (<?php echo e($this->t('theoretical')); ?> / <?php echo e($this->t('measured')); ?>)</dt><dd class="font-semibold"><?php echo e($detailOrder->gross_weight !== null ? $detailOrder->gross_weight.' g' : '-'); ?> / <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['text-red-600' => $detailOrder->measuredDeviates('gross_weight')]); ?>"><?php echo e($detailOrder->measured_gross_weight !== null ? $detailOrder->measured_gross_weight.' g' : '-'); ?></span></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('color_percentage')); ?> (<?php echo e($this->t('theoretical')); ?> / <?php echo e($this->t('measured')); ?>)</dt><dd class="font-semibold"><?php echo e($detailOrder->color_percentage !== null ? number_format((float) $detailOrder->color_percentage, 2, ',', ' ').'%' : '-'); ?> / <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['text-red-600' => $detailOrder->measuredDeviates('color_percentage')]); ?>"><?php echo e($detailOrder->measured_color_percentage !== null ? number_format((float) $detailOrder->measured_color_percentage, 2, ',', ' ').'%' : '-'); ?></span></dd></div>
-                                <div><dt class="text-slate-500"><?php echo e($this->t('yesterday_quantity_same_time')); ?></dt><dd class="font-semibold"><?php echo e($detailMetrics->quantityAtYesterdaySameTime($detailOrder) ?? '-'); ?></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('planned_start')); ?></dt><dd class="font-semibold"><?php echo e($detailOrder->date?->format('Y-m-d') ?? '-'); ?></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('actual_start')); ?></dt><dd class="font-semibold"><?php echo e($this->productionStartedAt($detailOrder)?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-'); ?></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('planned_end')); ?></dt><dd class="font-semibold"><?php echo e($detailOrder->planned_end_date?->format('Y-m-d') ?? '-'); ?></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('actual_end')); ?></dt><dd class="font-semibold"><?php echo e($detailOrder->ended_at?->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i') ?? '-'); ?></dd></div>
-                            </dl>
-                            <dl class="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-white/80 p-3 text-sm sm:grid-cols-4">
-                                <div><dt class="text-slate-500"><?php echo e($this->t('utilization_last_24_hours')); ?></dt><dd class="font-semibold"><?php echo e(($utilization = $detailMetrics->utilizationLast24Hours($detailOrder)) === null ? '-' : number_format($utilization, 1, ',', ' ').'%'); ?></dd></div>
-                                <div><dt class="text-slate-500"><?php echo e($this->t('theoretical_daily_production')); ?></dt><dd class="font-semibold"><?php echo e($detailMetrics->theoreticalDailyProduction($detailOrder) ?? '-'); ?> db</dd></div>
-                                <div><dt class="text-slate-500"><?php echo e($this->t('actual_production_last_24_hours')); ?></dt><dd class="font-semibold"><?php echo e($detailMetrics->producedLast24Hours() ?? '-'); ?> db</dd></div>
-                                <div><dt class="text-slate-500"><?php echo e($this->t('daily_color_consumption')); ?></dt><dd class="font-semibold"><?php echo e(($consumption = $detailMetrics->dailyColorConsumptionKg($detailOrder)) === null ? '-' : number_format($consumption, 3, ',', ' ').' kg'); ?></dd></div>
                             </dl>
                             <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailOrder->product?->material || $detailOrder->product?->color || $detailOrder->product?->additives?->isNotEmpty()): ?>
                                 <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
@@ -88,7 +76,6 @@
                                     <div class="col-span-2"><dt class="text-slate-500"><?php echo e($this->t('additives')); ?></dt><dd class="font-semibold"><?php echo e($detailOrder->product?->additives?->pluck('name')->join(', ') ?: '-'); ?></dd></div>
                                 </dl>
                             <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
-                            <div class="mt-4 flex justify-between text-sm"><span><?php echo e($this->t('current_quantity')); ?></span><strong><?php echo e($detailOrder->current_quantity); ?> / <?php echo e($detailOrder->quantity); ?> db</strong></div>
                             <?php echo $__env->make('partials.production-progress-bar', ['order' => $detailOrder], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
                             <div class="mt-3">
                                 <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($this->qualityStatus($detailOrder))]); ?>"><?php echo e($this->t('quality')); ?>: <?php echo e($this->statusLabel($this->qualityStatus($detailOrder))); ?></span>
