@@ -39,15 +39,13 @@ class ExampleTest extends TestCase
         Livewire::actingAs($user)->test('production-dashboard')
             ->assertSeeHtml('wire:model.live="machineFilter"')
             ->assertSee('Aktív gépek')
-            ->call('filterMachines', 'warning')
+            ->set('machineFilter', 'warning')
             ->assertSee('M-WARN')
             ->assertSee('M-ACTIVE')
             ->assertDontSee('M-STOPPED')
-            ->call('filterMachines', 'stopped')
+            ->set('machineFilter', 'stopped')
             ->assertSee('M-STOPPED')
-            ->assertDontSee('M-WARN')
-            ->call('filterMachines', 'stopped')
-            ->assertSet('machineFilter', 'all');
+            ->assertDontSee('M-WARN');
     }
 
     public function test_machine_table_shows_the_requested_columns_and_opens_machine_details_on_click(): void
@@ -122,6 +120,18 @@ class ExampleTest extends TestCase
         $this->assertSame('setup', $component->machineState($machines[$setup->id]));
 
         $dashboard->assertSeeHtml('border-l-blue-500')->assertSeeHtml('border-l-red-500')->assertSeeHtml('border-l-slate-300');
+    }
+
+    public function test_help_tab_is_visible_to_everyone_in_both_languages(): void
+    {
+        $user = User::factory()->create(['role' => Role::Operator]);
+
+        Livewire::actingAs($user)->test('production-dashboard')
+            ->call('selectTab', 'help')
+            ->assertSet('activeTab', 'help')
+            ->assertSee('Egy megrendelő útja')
+            ->call('selectLanguage', 'de')
+            ->assertSee('Der Weg eines Auftrags');
     }
 
     public function test_production_time_calculator_loads_product_data_and_computes_duration(): void

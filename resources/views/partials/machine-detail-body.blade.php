@@ -4,46 +4,46 @@
 @php($detailNextOrder = $detailNextOrder?->is($detailOrder) ? null : $detailNextOrder)
 @php($detailMould = $detailOrder?->mould)
 <div @class(['space-y-4' => ! ($inline ?? false), 'grid gap-4 lg:grid-cols-5' => ($inline ?? false)])>
-<div @class(['space-y-4', 'lg:col-span-2' => ($inline ?? false)])>
-                    <section class="rounded-lg border border-slate-200 p-4">
+<div @class(['grid gap-3 lg:grid-cols-2' => ! ($inline ?? false), 'space-y-3 lg:col-span-2' => ($inline ?? false)])>
+                    <section class="rounded-lg border border-slate-200 px-3 py-2">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h3 class="font-bold text-slate-900">{{ $this->t('machine_details') }}</h3>
-                            <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($detail->status)])>{{ $this->statusLabel($detail->status) }}</span>
+                            <h3 class="text-sm font-bold text-slate-900">{{ $this->t('machine_details') }}</h3>
+                            <span @class(['rounded-full px-2 py-0.5 text-xs font-bold', $this->statusClass($detail->status)])>{{ $this->statusLabel($detail->status) }}</span>
                         </div>
-                        <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+                        <dl class="mt-1.5 grid grid-cols-3 gap-2 text-xs">
                             <div><dt class="text-slate-500">{{ $this->t('type') }}</dt><dd class="font-semibold">{{ $detail->type }}</dd></div>
                             <div><dt class="text-slate-500">{{ $this->t('opening') }}</dt><dd class="font-semibold">{{ $detail->open_mm ?? '-' }} mm</dd></div>
                             <div><dt class="text-slate-500">{{ $this->t('screw_diameter') }}</dt><dd class="font-semibold">{{ $detail->screw_diameter_cm ?? '-' }} cm</dd></div>
                         </dl>
                         @if ($detail->problem_description)
-                            <p class="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{ $detail->problem_description }}</p>
+                            <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{ $detail->problem_description }}</p>
                         @endif
                     </section>
 
-                    <section class="rounded-lg border border-slate-200 p-4">
+                    <section class="rounded-lg border border-slate-200 px-3 py-2">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h3 class="font-bold text-slate-900">{{ $this->t('mounted_mould') }}</h3>
+                            <h3 class="text-sm font-bold text-slate-900">{{ $this->t('mounted_mould') }}</h3>
                             @if ($detailMould)
-                                <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($detailMould->status)])>{{ $this->statusLabel($detailMould->status) }}</span>
+                                <span @class(['rounded-full px-2 py-0.5 text-xs font-bold', $this->statusClass($detailMould->status)])>{{ $this->statusLabel($detailMould->status) }}</span>
                             @endif
                         </div>
                         @if ($detailMould)
-                            <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                            <dl class="mt-1.5 grid grid-cols-4 gap-2 text-xs">
                                 <div class="col-span-2"><dt class="text-slate-500">{{ $this->t('moulds') }}</dt><dd class="font-semibold">{{ $detailMould->name }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('number') }}</dt><dd class="font-semibold">{{ $detailMould->number ?? '-' }}</dd></div>
                                 <div><dt class="text-slate-500">{{ $this->t('cavity_count') }}</dt><dd class="font-semibold">{{ $detailMould->cavity_count ?? '-' }}</dd></div>
                             </dl>
                             @if ($detailMould->problem_description)
-                                <p class="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{ $detailMould->problem_description }}</p>
+                                <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{ $detailMould->problem_description }}</p>
                             @endif
                         @else
-                            <p class="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-500">{{ $this->t('no_mounted_mould') }}</p>
+                            <p class="mt-2 rounded-md bg-slate-50 p-2 text-xs text-slate-500">{{ $this->t('no_mounted_mould') }}</p>
                         @endif
                         @if ($detail->moulds->isNotEmpty())
-                            <p class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ $this->t('compatible_moulds') }}</p>
-                            <div class="mt-2 flex flex-wrap gap-2">
+                            <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                                <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{{ $this->t('compatible_moulds') }}:</span>
                                 @foreach ($detail->moulds as $compatible)
-                                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700">{{ $compatible->name }}</span>
+                                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{{ $compatible->name }}</span>
                                 @endforeach
                             </div>
                         @endif

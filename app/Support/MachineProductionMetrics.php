@@ -85,7 +85,7 @@ class MachineProductionMetrics
 
     public function theoreticalDailyProduction(?Order $order): ?int
     {
-        $cycleTime = $order?->product?->planned_cycle_time;
+        $cycleTime = $order?->cycle_time;
         $cavities = $order?->mould?->cavity_count;
 
         if (! $cycleTime || ! $cavities) {

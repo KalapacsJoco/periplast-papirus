@@ -50,9 +50,6 @@ new class extends Component
     public $calcCycleSeconds = null;
 
     public $calcQuantity = null;
-    public string $status = '';
-
-    public string $problemDescription = '';
 
     public string $orderStatus = 'in_progress';
 
@@ -193,8 +190,7 @@ new class extends Component
     public function canViewTab(string $tab): bool
     {
         return match ($tab) {
-            'machines' => true,
-            'orders', 'notifications', 'maintenance', 'calculators' => true,
+            'machines', 'orders', 'notifications', 'maintenance', 'calculators', 'help' => true,
             'tasks' => $this->isAdmin() || $this->canDo(Role::ASSIGN_ORDER) || $this->canDo(Role::CHECK_COLOR),
             'moulds', 'products' => $this->isAdmin(),
             default => false,
@@ -220,17 +216,23 @@ new class extends Component
     public function machines()
     {
         return Machine::query()
-            ->with(['orders' => fn ($query) => $query
-                ->where(function ($query): void {
-                    $query
-                        ->whereIn('status', ['waiting', 'in_progress', 'paused', 'interrupted'])
-                        ->orWhere('ended_at', '>=', now()->subDay());
-                })
-                ->with(['mould:id,name,number,cavity_count,status,problem_description', 'product:id,name,code,planned_cycle_time'])
-                ->orderBy('date')
-                ->orderBy('id')])
+            ->with(['orders' => fn ($query) => $this->boardOrders($query, ['mould:id,name,number,cavity_count,status,problem_description', 'product:id,name,code'])])
             ->orderBy('name')
             ->get();
+    }
+
+    /** Unfinished orders plus those that ended within the last day, in schedule order. */
+    private function boardOrders($query, array $with)
+    {
+        return $query
+            ->where(function ($query): void {
+                $query
+                    ->whereIn('status', ['waiting', 'in_progress', 'paused', 'interrupted'])
+                    ->orWhere('ended_at', '>=', now()->subDay());
+            })
+            ->with($with)
+            ->orderBy('date')
+            ->orderBy('id');
     }
 
     public function machineHasWarning(Machine $machine): bool
@@ -281,11 +283,6 @@ new class extends Component
         };
     }
 
-    public function filterMachines(string $filter): void
-    {
-        $this->machineFilter = in_array($filter, ['active', 'stopped', 'warning', 'setup', 'idle'], true) && $this->machineFilter !== $filter ? $filter : 'all';
-    }
-
     #[Computed]
     public function moulds()
     {
@@ -317,16 +314,6 @@ new class extends Component
         return Order::query()
             ->with(['machine:id,name', 'product:id,name,code', 'assignedOperator:id,name'])
             ->orderByDesc('date')
-            ->orderBy('order_number')
-            ->get();
-    }
-
-    #[Computed]
-    public function pausedOrders()
-    {
-        return Order::query()
-            ->where('status', 'paused')
-            ->with(['machine:id,name', 'product:id,name,code'])
             ->orderBy('order_number')
             ->get();
     }
@@ -436,15 +423,7 @@ new class extends Component
         return Machine::query()
             ->with([
                 'moulds:id,name,number',
-                'orders' => fn ($query) => $query
-                    ->where(function ($query): void {
-                        $query
-                            ->whereIn('status', ['waiting', 'in_progress', 'paused', 'interrupted'])
-                            ->orWhere('ended_at', '>=', now()->subDay());
-                    })
-                    ->with(['mould', 'product.material', 'product.color', 'product.additives'])
-                    ->orderBy('date')
-                    ->orderBy('id'),
+                'orders' => fn ($query) => $this->boardOrders($query, ['mould', 'product.material', 'product.color', 'product.additives']),
             ])
             ->find($machineId);
     }
@@ -541,7 +520,7 @@ new class extends Component
 
         $previousStatus = $order->status;
         $order->update($updates);
-        $this->appendProtocolEntry($order->refresh(), $quantity, 'order_status', $this->t('order_status_note', ['status' => $this->statusLabel($validated['orderStatus'])]));
+        $order->appendProtocolEntry($quantity, 'order_status', $this->t('order_status_note', ['status' => $this->statusLabel($validated['orderStatus'])]));
         if ($previousStatus !== $validated['orderStatus'] && Auth::user()->role === Role::Programmer) {
             $this->notifyWorkflowRecipients($order->refresh(), $validated['orderStatus']);
         }
@@ -562,7 +541,7 @@ new class extends Component
             'activated_at' => $order->status === 'waiting' ? now() : $order->activated_at,
             'last_paused_at' => null,
         ]);
-        $this->appendProtocolEntry($order->refresh(), $order->current_quantity, 'order_status', $this->t('order_activated_note'));
+        $order->appendProtocolEntry($order->current_quantity, 'order_status', $this->t('order_activated_note'));
         if (Auth::user()->role === Role::Programmer) {
             $this->notifyWorkflowRecipients($order->refresh(), 'activated');
         }
@@ -602,14 +581,13 @@ new class extends Component
         ]);
 
         $order = Order::findOrFail($this->measuredOrderId);
-        $order->update([
-            'measured_cycle_time' => (int) round((float) $validated['measuredCycleSeconds'] * 1000),
-            'measured_net_weight' => (float) $validated['measuredNetWeight'],
-            'measured_gross_weight' => (float) $validated['measuredGrossWeight'],
-            'measured_color_percentage' => (float) $validated['measuredColorPercentage'],
-            'measured_at' => now(),
+        $changes = $order->updateMeasured([
+            'cycle_time' => (int) round((float) $validated['measuredCycleSeconds'] * 1000),
+            'net_weight' => (float) $validated['measuredNetWeight'],
+            'gross_weight' => (float) $validated['measuredGrossWeight'],
+            'color_percentage' => (float) $validated['measuredColorPercentage'],
         ]);
-        $this->appendProtocolEntry($order->refresh(), $order->current_quantity, 'parameter_change', $this->t('measured_data_saved_note'));
+        $order->appendProtocolEntry($order->current_quantity, 'parameter_change', $this->t('measured_data_saved_note'), ['changes' => $changes]);
 
         $this->showMeasuredModal = false;
         $this->flashMessage = $this->t('measured_data_saved');
@@ -628,9 +606,7 @@ new class extends Component
         $this->qualityOrderId = $order->id;
         $this->currentQuantity = $order->current_quantity;
         $this->qualityStatus = 'good';
-        $this->qualityProblemType = $this->canDo(Role::CHECK_COLOR) && ! $this->canDo(Role::CHECK_QUALITY)
-            ? 'color_issue'
-            : 'surface_defect';
+        $this->qualityProblemType = $this->qualityProblemTypes()[0];
         $this->qualityProblemNote = '';
         $this->resolutionDescription = '';
         $this->quantityWarning = '';
@@ -638,14 +614,27 @@ new class extends Component
         $this->showQualityModal = true;
     }
 
+    public function isColorCheckOnly(): bool
+    {
+        return $this->canDo(Role::CHECK_COLOR) && ! $this->canDo(Role::CHECK_QUALITY);
+    }
+
+    /** @return list<string> */
+    public function qualityProblemTypes(): array
+    {
+        return $this->isColorCheckOnly()
+            ? ['color_issue']
+            : ['surface_defect', 'dimension_issue', 'color_issue', 'material_issue', 'burn_mark', 'flash', 'short_shot', 'contamination', 'other'];
+    }
+
     public function saveQualityCheck(bool $confirmed = false): void
     {
         $this->ensurePermission(Role::CHECK_QUALITY, Role::CHECK_COLOR);
-        $isColorCheck = ! $this->canDo(Role::CHECK_QUALITY);
+        $isColorCheck = $this->isColorCheckOnly();
         $validated = $this->validate([
             'qualityStatus' => ['required', Rule::in(['good', 'warning', 'quality_issue'])],
             'currentQuantity' => ['required', 'integer', 'min:0'],
-            'qualityProblemType' => ['required_unless:qualityStatus,good', 'nullable', Rule::in($isColorCheck ? ['color_issue'] : ['surface_defect', 'dimension_issue', 'color_issue', 'material_issue', 'burn_mark', 'flash', 'short_shot', 'contamination', 'other'])],
+            'qualityProblemType' => ['required_unless:qualityStatus,good', 'nullable', Rule::in($this->qualityProblemTypes())],
             'qualityProblemNote' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->qualityStatus !== 'good')],
             'resolutionDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->requiresResolution())],
         ]);
@@ -705,9 +694,7 @@ new class extends Component
             $order->machine->update(['status' => 'active', 'problem_description' => null]);
             unset($this->machines, $this->detailMachine, $this->expandedMachine);
         }
-        $this->appendProtocolEntry(
-            $order->refresh(),
-            $quantity,
+        $order->appendProtocolEntry($quantity,
             'quality_check',
             $this->t('quality_check_note', ['status' => $this->statusLabel($validated['qualityStatus'])])
                 .($validated['qualityStatus'] !== 'good' && filled($validated['qualityProblemNote'] ?? null) ? ': '.$validated['qualityProblemNote'] : '')
@@ -733,9 +720,7 @@ new class extends Component
         if ($operatorId === '') {
             $order->update(['assigned_operator_id' => null]);
             if ($previousOperatorId !== null) {
-                $this->appendProtocolEntry(
-                    $order->refresh(),
-                    $order->current_quantity,
+                $order->appendProtocolEntry($order->current_quantity,
                     'assignment',
                     $this->t('operator_unassigned_note')
                 );
@@ -750,9 +735,7 @@ new class extends Component
             $order->update(['assigned_operator_id' => $operator->id]);
             if ($assignmentChanged) {
                 $operator->notify(new OrderWorkflowNotification($order, 'assigned', Auth::user()->name));
-                $this->appendProtocolEntry(
-                    $order->refresh(),
-                    $order->current_quantity,
+                $order->appendProtocolEntry($order->current_quantity,
                     'assignment',
                     $this->t('operator_assignment_note', ['operator' => $operator->name])
                 );
@@ -778,7 +761,7 @@ new class extends Component
             'status' => 'setup',
             'problem_description' => null,
         ]);
-        $this->appendProtocolEntry($order->refresh(), $order->current_quantity, 'task_started', $this->t('task_started_note'));
+        $order->appendProtocolEntry($order->current_quantity, 'task_started', $this->t('task_started_note'));
 
         $this->flashMessage = $this->t('task_started');
         unset($this->machines, $this->ordersForMyTasks);
@@ -824,7 +807,7 @@ new class extends Component
             $this->ensurePermission($stop ? Role::STOP_MACHINE : Role::REPORT_EQUIPMENT_WARNING);
         }
 
-        $this->appendProtocolEntry($order, $order->current_quantity, $type, $note);
+        $order->appendProtocolEntry($order->current_quantity, $type, $note);
 
         match ($type) {
             'machine_issue', 'other' => $order->machine?->update([
@@ -840,7 +823,7 @@ new class extends Component
         };
 
         if ($type === 'mould_issue' && $stop && $order->mould_id) {
-            $this->pauseOrdersFor('mould_id', $order->mould_id, $note);
+            Order::pauseRunning(['mould_id' => $order->mould_id], $note);
         }
 
         unset($this->machines);
@@ -931,7 +914,7 @@ new class extends Component
 
     public function expectedQuantity(Order $order): ?int
     {
-        $cycleMs = $order->product?->planned_cycle_time ?: $order->cycle_time;
+        $cycleMs = $order->cycle_time;
         $cavities = $order->mould?->cavity_count;
         $startedAt = $this->productionStartedAt($order);
 
@@ -1039,38 +1022,6 @@ new class extends Component
 
         return $problems;
     }
-
-    private function pauseOrdersFor(string $column, int $id, string $reason): void
-    {
-        Order::query()->where($column, $id)->where('status', 'in_progress')->each(function (Order $order) use ($reason): void {
-            $order->update([
-                'status' => 'paused',
-                'pause_description' => $reason,
-                'last_paused_at' => now(),
-                'good_quantity' => $order->good_quantity ?: $order->current_quantity,
-            ]);
-            $this->appendProtocolEntry($order->refresh(), $order->current_quantity, 'issue', $reason);
-        });
-    }
-
-    private function appendProtocolEntry(Order $order, int $quantity, string $type, string $note, array $meta = []): void
-    {
-        $protocol = $order->production_protocol ?? [];
-        $entries = $protocol['entries'] ?? [];
-        $entries[] = [
-            'timestamp' => Carbon::now()->toIso8601String(),
-            'entry_type' => $type,
-            'current_quantity' => max(0, min($quantity, $order->quantity)),
-            'note' => $note,
-            'meta' => $meta,
-            'signed_by' => Auth::user()?->name ?? 'API',
-            'signed_by_user_id' => Auth::id(),
-        ];
-        $order->update([
-            'current_quantity' => max(0, min($quantity, $order->quantity)),
-            'production_protocol' => array_merge($protocol, ['entries' => $entries]),
-        ]);
-    }
 };
 ?>
 
@@ -1119,7 +1070,7 @@ new class extends Component
         </div>
         <nav wire:poll.15s class="border-t border-slate-100" aria-label="Main">
             <div x-bind:class="menuOpen ? 'flex' : 'hidden md:flex'" class="mx-auto max-w-7xl flex-col gap-1 px-2 py-2 md:flex-row md:overflow-x-auto md:py-0 sm:px-4">
-                @foreach (['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'notifications' => 'notifications', 'maintenance' => 'maintenance', 'calculators' => 'calculators', 'moulds' => 'moulds', 'products' => 'products'] as $tab => $label)
+                @foreach (['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'notifications' => 'notifications', 'maintenance' => 'maintenance', 'calculators' => 'calculators', 'moulds' => 'moulds', 'products' => 'products', 'help' => 'help'] as $tab => $label)
                     @if ($this->canViewTab($tab))
                     <button wire:click="selectTab('{{ $tab }}')" x-on:click="menuOpen = false" @class(['shrink-0 whitespace-nowrap rounded-md px-4 py-3 text-left text-sm font-semibold transition md:rounded-none md:border-b-2', 'bg-teal-50 text-teal-700 md:border-teal-600 md:bg-transparent' => $activeTab === $tab, 'text-slate-600 hover:text-teal-700 md:border-transparent' => $activeTab !== $tab])>
                         {{ $this->t($label) }}
@@ -1163,7 +1114,7 @@ new class extends Component
                         <thead class="text-slate-700">
                             <tr>
                                 @foreach (['machine_number', 'type', 'running_product', 'gross_weight', 'net_weight', 'order_number', 'product_code', 'required_quantity', 'current_quantity', 'yesterday_quantity_same_time', 'cavity_count', 'actual_cycle_time', 'utilization_last_24_hours', 'theoretical_daily_production', 'actual_production_last_24_hours', 'color_percentage', 'daily_color_consumption', 'next_activated_order', 'production_protocol'] as $column)
-                                    <th @class(['sticky top-[var(--header-h,7rem)] z-30 bg-slate-200 py-2', 'rounded-l-md' => $loop->first, 'rounded-r-md' => $loop->last]) title="{{ $this->t($column) }}">{{ $this->t(in_array($column, ['type', 'gross_weight', 'net_weight', 'production_protocol'], true) ? $column : 'col_'.$column) }}</th>
+                                    <th style="top: var(--header-h, 7rem)" @class(['sticky z-30 bg-slate-200 py-2 shadow-[0_2px_0_0_rgb(241_245_249)]', 'rounded-l-md' => $loop->first, 'rounded-r-md' => $loop->last]) title="{{ $this->t($column) }}">{{ $this->t(in_array($column, ['type', 'gross_weight', 'net_weight', 'production_protocol'], true) ? $column : 'col_'.$column) }}</th>
                                 @endforeach
                             </tr>
                         </thead>
@@ -1201,7 +1152,7 @@ new class extends Component
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">
                                         @if ($nextOrder)
                                             <span class="block font-semibold">{{ $nextOrder->order_number }}</span>
-                                            <span class="block">{{ $nextOrder->product?->code ?? $nextOrder->product?->name }}</span>
+                                            <span class="block">{{$nextOrder->product?->name }}</span>
                                         @else
                                             -
                                         @endif
@@ -1259,9 +1210,6 @@ new class extends Component
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($machine->status)])>{{ $this->statusLabel($machine->status) }}</span>
-                                    @if ($this->canDo(\App\Enums\Role::START_MACHINE) || $this->canDo(\App\Enums\Role::STOP_MACHINE) || $this->canDo(\App\Enums\Role::REPORT_EQUIPMENT_WARNING))
-                                        <button wire:click.stop="openMachineModal({{ $machine->id }})" class="rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-teal-700" title="{{ $this->t('change_status') }}">⚙</button>
-                                    @endif
                                 </div>
                             </div>
                             <div class="p-5">
@@ -1294,7 +1242,7 @@ new class extends Component
                                                 <span class="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">{{ $this->t('quality_check_overdue') }}</span>
                                             @endif
                                             @if ($this->canCheckQuality())
-                                                <button wire:click.stop="openQualityModal({{ $order->id }})" class="rounded-md border border-teal-300 bg-white px-3 py-1 text-xs font-bold text-teal-800 hover:bg-teal-100">{{ $this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'color_check' : 'quality_check') }}</button>
+                                                <button wire:click.stop="openQualityModal({{ $order->id }})" class="rounded-md border border-teal-300 bg-white px-3 py-1 text-xs font-bold text-teal-800 hover:bg-teal-100">{{ $this->t($this->isColorCheckOnly() ? 'color_check' : 'quality_check') }}</button>
                                             @endif
                                             <button wire:click.stop="openProductionProtocol({{ $order->id }})" class="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100">{{ $this->t('production_protocol') }}</button>
                                         </div>
@@ -1333,6 +1281,21 @@ new class extends Component
             <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('maintenance') }}</h1>
                 <p class="mt-4 text-sm text-slate-500">{{ $this->t('no_maintenance_yet') }}</p>
+            </section>
+        @elseif ($activeTab === 'help')
+            <section class="space-y-4">
+                <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('help') }}</h1>
+                <p class="text-sm text-slate-600">{{ $this->t('help_intro') }}</p>
+                @foreach (trans('dashboard.help_sections', [], $locale) as $section)
+                    <article class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <h2 class="text-lg font-bold text-slate-900">{{ $section['title'] }}</h2>
+                        <ul class="mt-3 list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-700">
+                            @foreach ($section['items'] as $item)
+                                <li>{{ $item }}</li>
+                            @endforeach
+                        </ul>
+                    </article>
+                @endforeach
             </section>
         @elseif ($activeTab === 'calculators')
             <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1544,6 +1507,14 @@ new class extends Component
                                         <time class="text-sm text-slate-600">{{ \Illuminate\Support\Carbon::parse(data_get($entry, 'timestamp'))->timezone(config('app.display_timezone'))->format('Y-m-d H:i:s') }}</time>
                                     </div>
                                     <p class="mt-2 whitespace-pre-wrap text-sm">{{ data_get($entry, 'note', '') }}</p>
+                                    @if ($changes = data_get($entry, 'meta.changes'))
+                                        <ul class="mt-2 space-y-1 rounded-md bg-white/70 p-2 text-sm">
+                                            @foreach ($changes as $change)
+                                                @php($unit = ['cycle_time' => ' s', 'color_percentage' => ' %'][$change['field']] ?? '')
+                                                <li><span class="font-semibold">{{ $this->t('measured_'.$change['field']) }}:</span> {{ $change['from'] === null ? '–' : $change['from'].$unit }} → <strong>{{ $change['to'].$unit }}</strong></li>
+                                            @endforeach
+                                        </ul>
+                                    @endif
                                     <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                                         <span>{{ $this->t('signed_by') }}: {{ data_get($entry, 'signed_by', $this->t('unknown_signer')) }}</span>
                                         <span>{{ $this->t('current_quantity') }}: {{ data_get($entry, 'current_quantity', $protocolOrder->current_quantity) }}</span>
@@ -1623,7 +1594,7 @@ new class extends Component
     @endif
 
     @if ($showQualityModal)
-        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold">{{ $this->t($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY) ? 'record_color_check' : 'record_quality_check') }}</h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold">{{ $this->t('result') }}<select wire:model.live="qualityStatus" class="mt-1 w-full rounded-md border-slate-300"><option value="good">{{ $this->t('good') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="quality_issue">{{ $this->t('quality_issue') }}</option></select></label><label class="text-sm font-semibold">{{ $this->t('current_quantity') }}<input wire:model="currentQuantity" wire:input="$set('quantityWarning', '')" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@if($quantityWarning !== '')<div class="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert"><p class="font-semibold">{{ $quantityWarning }}</p><p class="mt-1">{{ $this->t('quantity_confirm_question') }}</p><div class="mt-3 flex gap-2"><button wire:click="saveQualityCheck(true)" class="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700">{{ $this->t('quantity_confirm_yes') }}</button><button wire:click="$set('quantityWarning', '')" class="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-bold text-amber-900">{{ $this->t('quantity_confirm_edit') }}</button></div></div>@endif@if($qualityStatus !== 'good')<div wire:key="quality-problem-fields-{{ $qualityStatus }}" class="grid gap-4"><label class="text-sm font-semibold">{{ $this->t('problem_type') }}<select wire:model="qualityProblemType" class="mt-1 w-full rounded-md border-slate-300">@if ($this->canDo(\App\Enums\Role::CHECK_COLOR) && ! $this->canDo(\App\Enums\Role::CHECK_QUALITY))<option value="color_issue">{{ $this->t('color_issue') }}</option>@else<option value="surface_defect">{{ $this->t('surface_defect') }}</option><option value="dimension_issue">{{ $this->t('dimension_issue') }}</option><option value="color_issue">{{ $this->t('color_issue') }}</option><option value="material_issue">{{ $this->t('material_issue') }}</option><option value="burn_mark">{{ $this->t('burn_mark') }}</option><option value="flash">{{ $this->t('flash') }}</option><option value="short_shot">{{ $this->t('short_shot') }}</option><option value="contamination">{{ $this->t('contamination') }}</option><option value="other">{{ $this->t('other') }}</option>@endif</select></label><label class="text-sm font-semibold">{{ $this->t('problem_reason') }}<textarea wire:model="qualityProblemNote" rows="3" placeholder="{{ $this->t('problem_reason_placeholder') }}" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('qualityProblemNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label></div>@endif @if ($this->requiresResolution())<label class="text-sm font-semibold">{{ $this->t('resolution_description') }}<textarea wire:model="resolutionDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('resolutionDescription')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>@endif</div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showQualityModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="saveQualityCheck" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('record') }}</button></div></div></div>
+        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold">{{ $this->t($this->isColorCheckOnly() ? 'record_color_check' : 'record_quality_check') }}</h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold">{{ $this->t('result') }}<select wire:model.live="qualityStatus" class="mt-1 w-full rounded-md border-slate-300"><option value="good">{{ $this->t('good') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="quality_issue">{{ $this->t('quality_issue') }}</option></select></label><label class="text-sm font-semibold">{{ $this->t('current_quantity') }}<input wire:model="currentQuantity" wire:input="$set('quantityWarning', '')" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@if($quantityWarning !== '')<div class="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert"><p class="font-semibold">{{ $quantityWarning }}</p><p class="mt-1">{{ $this->t('quantity_confirm_question') }}</p><div class="mt-3 flex gap-2"><button wire:click="saveQualityCheck(true)" class="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700">{{ $this->t('quantity_confirm_yes') }}</button><button wire:click="$set('quantityWarning', '')" class="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-bold text-amber-900">{{ $this->t('quantity_confirm_edit') }}</button></div></div>@endif@if($qualityStatus !== 'good')<div wire:key="quality-problem-fields-{{ $qualityStatus }}" class="grid gap-4"><label class="text-sm font-semibold">{{ $this->t('problem_type') }}<select wire:model="qualityProblemType" class="mt-1 w-full rounded-md border-slate-300">@foreach ($this->qualityProblemTypes() as $problemType)<option value="{{ $problemType }}">{{ $this->t($problemType) }}</option>@endforeach</select></label><label class="text-sm font-semibold">{{ $this->t('problem_reason') }}<textarea wire:model="qualityProblemNote" rows="3" placeholder="{{ $this->t('problem_reason_placeholder') }}" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('qualityProblemNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label></div>@endif @if ($this->requiresResolution())<label class="text-sm font-semibold">{{ $this->t('resolution_description') }}<textarea wire:model="resolutionDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('resolutionDescription')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>@endif</div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showQualityModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="saveQualityCheck" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('record') }}</button></div></div></div>
     @endif
     @endguest
 </div>

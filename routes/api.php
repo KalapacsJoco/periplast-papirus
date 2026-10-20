@@ -9,57 +9,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 
-$appendProtocolEntry = function (
-    Order $order,
-    int $currentQuantity,
-    string $entryType,
-    ?string $note = null,
-    array $meta = []
-): Order {
-    $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
-    $entries = is_array($protocol['entries'] ?? null) ? $protocol['entries'] : [];
-
-    $clampedQuantity = max(0, min($currentQuantity, (int) $order->quantity));
-
-    $entries[] = [
-        'timestamp' => now()->toIso8601String(),
-        'entry_type' => $entryType,
-        'current_quantity' => $clampedQuantity,
-        'note' => $note,
-        'meta' => $meta,
-        'signed_by' => auth()->user()?->name ?? 'API',
-        'signed_by_user_id' => auth()->id(),
-    ];
-
-    $order->update([
-        'current_quantity' => $clampedQuantity,
-        'production_protocol' => array_merge($protocol, [
-            'entries' => $entries,
-        ]),
-    ]);
-
-    return $order->refresh();
-};
-
-$pauseRunningOrders = function (array $constraints, string $reason) use ($appendProtocolEntry): void {
-    $query = Order::query()->where('status', 'in_progress');
-
-    foreach ($constraints as $column => $value) {
-        $query->where($column, $value);
-    }
-
-    $query->get()->each(function (Order $order) use ($reason, $appendProtocolEntry): void {
-        $order->update([
-            'status' => 'paused',
-            'pause_description' => $reason,
-            'last_paused_at' => $order->last_paused_at ?? now(),
-            'good_quantity' => $order->good_quantity ?? (int) ($order->current_quantity ?? 0),
-            'bad_quantity' => $order->bad_quantity ?? 0,
-        ]);
-        $appendProtocolEntry($order->refresh(), (int) $order->current_quantity, 'issue', $reason);
-    });
-};
-
 Route::get('/machines', function () {
     return Machine::query()
         ->select(['id', 'name', 'type', 'open_mm', 'screw_diameter_cm', 'status', 'problem_description'])
@@ -68,7 +17,7 @@ Route::get('/machines', function () {
 });
 
 // Update machine status
-Route::post('/machines/{id}/status', function (Request $request, $id) use ($pauseRunningOrders, $appendProtocolEntry) {
+Route::post('/machines/{id}/status', function (Request $request, $id) {
     $validated = $request->validate([
         'status' => 'required|in:active,stopped,warning,broken,setup',
         'problem_description' => 'nullable|string',
@@ -96,24 +45,20 @@ Route::post('/machines/{id}/status', function (Request $request, $id) use ($paus
         ->where('machine_id', $machine->id)
         ->whereIn('status', ['in_progress', 'paused'])
         ->get()
-        ->each(fn (Order $order) => $appendProtocolEntry(
-            $order,
-            (int) $order->current_quantity,
+        ->each(fn (Order $order) => $order->appendProtocolEntry((int) $order->current_quantity,
             'machine_status',
             'Machine status changed to '.$status.($problem_description ? ': '.$problem_description : '')
         ));
 
     if ($status === 'broken') {
-        $pauseRunningOrders([
-            'machine_id' => $machine->id,
-        ], $problem_description ?: 'Machine broken - order paused automatically');
+        Order::pauseRunning(['machine_id' => $machine->id], $problem_description ?: 'Machine broken - order paused automatically');
     }
 
     return $machine;
 });
 
 // Restore a broken machine
-Route::post('/machines/{id}/restore', function ($id) use ($appendProtocolEntry) {
+Route::post('/machines/{id}/restore', function ($id) {
     $machine = Machine::findOrFail($id);
 
     if ($machine->status === 'broken') {
@@ -131,9 +76,7 @@ Route::post('/machines/{id}/restore', function ($id) use ($appendProtocolEntry) 
             ->where('machine_id', $machine->id)
             ->whereIn('status', ['in_progress', 'paused'])
             ->get()
-            ->each(fn (Order $order) => $appendProtocolEntry(
-                $order,
-                (int) $order->current_quantity,
+            ->each(fn (Order $order) => $order->appendProtocolEntry((int) $order->current_quantity,
                 'machine_status',
                 'Machine restored to active.'
             ));
@@ -152,7 +95,7 @@ Route::get('/moulds', function () {
         ->get();
 });
 
-Route::post('/moulds/{id}/status', function (Request $request, $id) use ($pauseRunningOrders, $appendProtocolEntry) {
+Route::post('/moulds/{id}/status', function (Request $request, $id) {
     $validated = $request->validate([
         'status' => 'required|in:active,standby,warning,needs_repair,under_repair',
         'problem_description' => 'nullable|string',
@@ -173,17 +116,13 @@ Route::post('/moulds/{id}/status', function (Request $request, $id) use ($pauseR
         ->where('mould_id', $mould->id)
         ->whereIn('status', ['in_progress', 'paused'])
         ->get()
-        ->each(fn (Order $order) => $appendProtocolEntry(
-            $order,
-            (int) $order->current_quantity,
+        ->each(fn (Order $order) => $order->appendProtocolEntry((int) $order->current_quantity,
             'mould_status',
             'Mould status changed to '.$status.($problemDescription ? ': '.$problemDescription : '')
         ));
 
     if ($status === 'needs_repair') {
-        $pauseRunningOrders([
-            'mould_id' => $mould->id,
-        ], $problemDescription ?: 'Mould needs repair - order paused automatically');
+        Order::pauseRunning(['mould_id' => $mould->id], $problemDescription ?: 'Mould needs repair - order paused automatically');
     }
 
     return $mould->load('products:id,name,code');
@@ -218,7 +157,7 @@ Route::get('/orders', function () {
         ->get();
 });
 
-Route::post('/orders/{id}/status', function (Request $request, $id) use ($appendProtocolEntry) {
+Route::post('/orders/{id}/status', function (Request $request, $id) {
     $validated = $request->validate([
         'status' => 'required|in:waiting,in_progress,paused,completed,interrupted',
         'pause_description' => 'nullable|string',
@@ -282,9 +221,7 @@ Route::post('/orders/{id}/status', function (Request $request, $id) use ($append
         'bad_quantity' => $badQuantity,
     ]);
     if ($previousStatus !== $status) {
-        $appendProtocolEntry(
-            $order->refresh(),
-            $currentQuantity,
+        $order->appendProtocolEntry($currentQuantity,
             'order_status',
             'Order status changed from '.$previousStatus.' to '.$status.($pauseDescription ? ': '.$pauseDescription : '')
         );
@@ -293,7 +230,7 @@ Route::post('/orders/{id}/status', function (Request $request, $id) use ($append
     return $order->load(['machine:id,name,status,problem_description', 'mould:id,name,number,cavity_count,status,problem_description', 'product:id,name,code,is_active']);
 });
 
-Route::post('/orders/{id}/production-data', function (Request $request, $id) use ($appendProtocolEntry) {
+Route::post('/orders/{id}/production-data', function (Request $request, $id) {
     $validated = $request->validate([
         'current_quantity' => 'required|integer|min:0',
     ]);
@@ -311,9 +248,7 @@ Route::post('/orders/{id}/production-data', function (Request $request, $id) use
         'last_paused_at' => $willBeCompleted ? null : $order->last_paused_at,
     ]);
     if ($order->wasChanged('current_quantity')) {
-        $appendProtocolEntry(
-            $order->refresh(),
-            $currentQuantity,
+        $order->appendProtocolEntry($currentQuantity,
             'production_update',
             'Production quantity updated.'
         );
@@ -326,7 +261,7 @@ Route::post('/orders/{id}/production-data', function (Request $request, $id) use
     ]);
 });
 
-Route::post('/orders/{id}/protocol', function (Request $request, $id) use ($appendProtocolEntry) {
+Route::post('/orders/{id}/protocol', function (Request $request, $id) {
     $validated = $request->validate([
         'machine_name' => 'nullable|string|max:255',
         'part_code' => 'nullable|string|max:255',
@@ -382,9 +317,7 @@ Route::post('/orders/{id}/protocol', function (Request $request, $id) use ($appe
         'color_percentage' => $order->color_percentage,
     ];
     if ($previousParameters !== $newParameters) {
-        $appendProtocolEntry(
-            $order->refresh(),
-            (int) $order->current_quantity,
+        $order->appendProtocolEntry((int) $order->current_quantity,
             'parameter_change',
             'Production parameters updated.',
             ['before' => $previousParameters, 'after' => $newParameters]
@@ -398,7 +331,7 @@ Route::post('/orders/{id}/protocol', function (Request $request, $id) use ($appe
     ]);
 });
 
-Route::post('/orders/{id}/measured-data', function (Request $request, $id) use ($appendProtocolEntry) {
+Route::post('/orders/{id}/measured-data', function (Request $request, $id) {
     $validated = $request->validate([
         'measured_cycle_time' => 'required|integer|min:1',
         'measured_net_weight' => 'required|numeric|min:0',
@@ -407,8 +340,13 @@ Route::post('/orders/{id}/measured-data', function (Request $request, $id) use (
     ]);
 
     $order = Order::findOrFail($id);
-    $order->update($validated + ['measured_at' => now()]);
-    $appendProtocolEntry($order->refresh(), (int) $order->current_quantity, 'parameter_change', 'Measured data updated.');
+    $changes = $order->updateMeasured([
+        'cycle_time' => (int) $validated['measured_cycle_time'],
+        'net_weight' => (float) $validated['measured_net_weight'],
+        'gross_weight' => (float) $validated['measured_gross_weight'],
+        'color_percentage' => (float) $validated['measured_color_percentage'],
+    ]);
+    $order->appendProtocolEntry((int) $order->current_quantity, 'parameter_change', 'Measured data updated.', ['changes' => $changes]);
 
     return $order->load([
         'machine:id,name,status,problem_description',
@@ -417,7 +355,7 @@ Route::post('/orders/{id}/measured-data', function (Request $request, $id) use (
     ]);
 });
 
-Route::post('/orders/{id}/quality-check', function (Request $request, $id) use ($appendProtocolEntry) {
+Route::post('/orders/{id}/quality-check', function (Request $request, $id) {
     $validated = $request->validate([
         'quality_status' => 'required|in:good,warning,quality_issue',
         'problem_type' => 'nullable|required_unless:quality_status,good|in:surface_defect,dimension_issue,color_issue,material_issue,burn_mark,flash,short_shot,contamination,other',
@@ -502,9 +440,7 @@ Route::post('/orders/{id}/quality-check', function (Request $request, $id) use (
         'resolution_note' => $qualityStatus === 'good' ? $resolutionNote : null,
     ];
 
-    $order = $appendProtocolEntry(
-        $order,
-        $currentQuantity,
+    $order = $order->appendProtocolEntry($currentQuantity,
         'quality_check',
         $protocolEntryNote,
         $entryMeta,
@@ -517,7 +453,7 @@ Route::post('/orders/{id}/quality-check', function (Request $request, $id) use (
     ]);
 });
 
-Route::post('/orders/{id}/protocol-entry', function (Request $request, $id) use ($appendProtocolEntry) {
+Route::post('/orders/{id}/protocol-entry', function (Request $request, $id) {
     $validated = $request->validate([
         'current_quantity' => 'required|integer|min:0',
         'entry_type' => 'required|in:quality_check,order_status,machine_issue,mould_issue,product_status,protocol_update,note,parameter_change,machine_status,mould_status,production_update,assignment,task_started,issue',
@@ -526,9 +462,7 @@ Route::post('/orders/{id}/protocol-entry', function (Request $request, $id) use 
     ]);
 
     $order = Order::findOrFail($id);
-    $order = $appendProtocolEntry(
-        $order,
-        (int) $validated['current_quantity'],
+    $order = $order->appendProtocolEntry((int) $validated['current_quantity'],
         $validated['entry_type'],
         $validated['note'] ?? null,
         $validated['meta'] ?? [],
@@ -541,7 +475,7 @@ Route::post('/orders/{id}/protocol-entry', function (Request $request, $id) use 
     ]);
 });
 
-Route::post('/products/{id}/status', function (Request $request, $id) use ($appendProtocolEntry) {
+Route::post('/products/{id}/status', function (Request $request, $id) {
     $validated = $request->validate([
         'status' => 'required|in:active,inactive',
     ]);
@@ -556,9 +490,7 @@ Route::post('/products/{id}/status', function (Request $request, $id) use ($appe
         ->where('product_id', $product->id)
         ->whereIn('status', ['in_progress', 'paused'])
         ->get()
-        ->each(fn (Order $order) => $appendProtocolEntry(
-            $order,
-            (int) $order->current_quantity,
+        ->each(fn (Order $order) => $order->appendProtocolEntry((int) $order->current_quantity,
             'product_status',
             'Product status changed to '.$validated['status'].'.'
         ));

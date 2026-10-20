@@ -193,7 +193,8 @@ class RolePermissionsTest extends TestCase
                     ['checked_at' => now()->subSeconds(50)->toIso8601String(), 'quality_status' => 'good'],
                 ]],
                 'mould_id' => Mould::factory()->create(['cavity_count' => 4])->id,
-                'product_id' => Product::factory()->create(['planned_cycle_time' => 10000])->id,
+                'cycle_time' => 10000,
+                'product_id' => Product::factory()->create()->id,
             ]);
 
             $this->assertSame(40, Livewire::actingAs($operator)->test('production-dashboard')->instance()->expectedQuantity($order->load(['mould', 'product'])));
@@ -216,7 +217,8 @@ class RolePermissionsTest extends TestCase
             'quantity' => 1000,
             'started_at' => now()->subHour(),
             'mould_id' => Mould::factory()->create(['cavity_count' => 4])->id,
-            'product_id' => Product::factory()->create(['planned_cycle_time' => 10000])->id,
+            'cycle_time' => 10000,
+                'product_id' => Product::factory()->create()->id,
             'production_protocol' => ['quality_checks' => [
                 ['checked_at' => now()->subMinutes(5)->toIso8601String(), 'quality_status' => 'quality_issue'],
             ]],
@@ -283,6 +285,18 @@ class RolePermissionsTest extends TestCase
         $this->assertTrue($order->measuredDeviates('gross_weight'));
         $this->assertFalse($order->measuredDeviates('color_percentage'));
 
+        $first = collect($order->production_protocol['entries'])->last()['meta']['changes'];
+        $this->assertCount(4, $first);
+        $this->assertSame(['field' => 'cycle_time', 'from' => null, 'to' => 10.01], $first[0]);
+
+        Livewire::actingAs($coordinator)
+            ->test('production-dashboard')
+            ->call('openMeasuredModal', $order->id)
+            ->set('measuredGrossWeight', 12.7)
+            ->call('saveMeasuredData');
+
+        $second = collect($order->fresh()->production_protocol['entries'])->last()['meta']['changes'];
+        $this->assertSame([['field' => 'gross_weight', 'from' => 12.5, 'to' => 12.7]], $second);
         Livewire::actingAs($qualityManager)
             ->test('production-dashboard')
             ->call('openQualityModal', $order->id)
@@ -308,7 +322,8 @@ class RolePermissionsTest extends TestCase
                 'quantity' => 1000,
                 'current_quantity' => 30,
                 'mould_id' => Mould::factory()->create(['cavity_count' => 4])->id,
-                'product_id' => Product::factory()->create(['planned_cycle_time' => 10000])->id,
+                'cycle_time' => 10000,
+                'product_id' => Product::factory()->create()->id,
                 'production_protocol' => ['quality_checks' => [
                     ['checked_at' => now()->subSeconds(100)->toIso8601String(), 'quality_status' => 'good'],
                 ]],

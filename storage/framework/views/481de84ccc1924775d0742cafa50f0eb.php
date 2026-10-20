@@ -4,46 +4,46 @@
 <?php ($detailNextOrder = $detailNextOrder?->is($detailOrder) ? null : $detailNextOrder); ?>
 <?php ($detailMould = $detailOrder?->mould); ?>
 <div class="<?php echo \Illuminate\Support\Arr::toCssClasses(['space-y-4' => ! ($inline ?? false), 'grid gap-4 lg:grid-cols-5' => ($inline ?? false)]); ?>">
-<div class="<?php echo \Illuminate\Support\Arr::toCssClasses(['space-y-4', 'lg:col-span-2' => ($inline ?? false)]); ?>">
-                    <section class="rounded-lg border border-slate-200 p-4">
+<div class="<?php echo \Illuminate\Support\Arr::toCssClasses(['grid gap-3 lg:grid-cols-2' => ! ($inline ?? false), 'space-y-3 lg:col-span-2' => ($inline ?? false)]); ?>">
+                    <section class="rounded-lg border border-slate-200 px-3 py-2">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h3 class="font-bold text-slate-900"><?php echo e($this->t('machine_details')); ?></h3>
-                            <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($detail->status)]); ?>"><?php echo e($this->statusLabel($detail->status)); ?></span>
+                            <h3 class="text-sm font-bold text-slate-900"><?php echo e($this->t('machine_details')); ?></h3>
+                            <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['rounded-full px-2 py-0.5 text-xs font-bold', $this->statusClass($detail->status)]); ?>"><?php echo e($this->statusLabel($detail->status)); ?></span>
                         </div>
-                        <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+                        <dl class="mt-1.5 grid grid-cols-3 gap-2 text-xs">
                             <div><dt class="text-slate-500"><?php echo e($this->t('type')); ?></dt><dd class="font-semibold"><?php echo e($detail->type); ?></dd></div>
                             <div><dt class="text-slate-500"><?php echo e($this->t('opening')); ?></dt><dd class="font-semibold"><?php echo e($detail->open_mm ?? '-'); ?> mm</dd></div>
                             <div><dt class="text-slate-500"><?php echo e($this->t('screw_diameter')); ?></dt><dd class="font-semibold"><?php echo e($detail->screw_diameter_cm ?? '-'); ?> cm</dd></div>
                         </dl>
                         <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detail->problem_description): ?>
-                            <p class="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700"><strong><?php echo e($this->t('problem')); ?>:</strong> <?php echo e($detail->problem_description); ?></p>
+                            <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong><?php echo e($this->t('problem')); ?>:</strong> <?php echo e($detail->problem_description); ?></p>
                         <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                     </section>
 
-                    <section class="rounded-lg border border-slate-200 p-4">
+                    <section class="rounded-lg border border-slate-200 px-3 py-2">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h3 class="font-bold text-slate-900"><?php echo e($this->t('mounted_mould')); ?></h3>
+                            <h3 class="text-sm font-bold text-slate-900"><?php echo e($this->t('mounted_mould')); ?></h3>
                             <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMould): ?>
-                                <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($detailMould->status)]); ?>"><?php echo e($this->statusLabel($detailMould->status)); ?></span>
+                                <span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['rounded-full px-2 py-0.5 text-xs font-bold', $this->statusClass($detailMould->status)]); ?>"><?php echo e($this->statusLabel($detailMould->status)); ?></span>
                             <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                         </div>
                         <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMould): ?>
-                            <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                            <dl class="mt-1.5 grid grid-cols-4 gap-2 text-xs">
                                 <div class="col-span-2"><dt class="text-slate-500"><?php echo e($this->t('moulds')); ?></dt><dd class="font-semibold"><?php echo e($detailMould->name); ?></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('number')); ?></dt><dd class="font-semibold"><?php echo e($detailMould->number ?? '-'); ?></dd></div>
                                 <div><dt class="text-slate-500"><?php echo e($this->t('cavity_count')); ?></dt><dd class="font-semibold"><?php echo e($detailMould->cavity_count ?? '-'); ?></dd></div>
                             </dl>
                             <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMould->problem_description): ?>
-                                <p class="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700"><strong><?php echo e($this->t('problem')); ?>:</strong> <?php echo e($detailMould->problem_description); ?></p>
+                                <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong><?php echo e($this->t('problem')); ?>:</strong> <?php echo e($detailMould->problem_description); ?></p>
                             <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                         <?php else: ?>
-                            <p class="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-500"><?php echo e($this->t('no_mounted_mould')); ?></p>
+                            <p class="mt-2 rounded-md bg-slate-50 p-2 text-xs text-slate-500"><?php echo e($this->t('no_mounted_mould')); ?></p>
                         <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                         <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detail->moulds->isNotEmpty()): ?>
-                            <p class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500"><?php echo e($this->t('compatible_moulds')); ?></p>
-                            <div class="mt-2 flex flex-wrap gap-2">
+                            <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                                <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-500"><?php echo e($this->t('compatible_moulds')); ?>:</span>
                                 <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = $detail->moulds; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $compatible): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
-                                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700"><?php echo e($compatible->name); ?></span>
+                                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700"><?php echo e($compatible->name); ?></span>
                                 <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
                             </div>
                         <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>

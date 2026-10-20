@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Auth;
 
 class Order extends Model
 {
@@ -103,6 +104,77 @@ class Order extends Model
         }
 
         return abs($measured - $theoretical) / abs($theoretical) * 100 > self::MEASURED_TOLERANCE_PERCENT;
+    }
+
+    /**
+     * Stores measured values and returns what changed as [field, from, to] rows
+     * (cycle time in seconds, so the protocol is readable).
+     *
+     * @param  array<string, int|float>  $values  keyed by cycle_time (ms), net_weight, gross_weight, color_percentage
+     * @return list<array{field: string, from: float|null, to: float}>
+     */
+    public function updateMeasured(array $values): array
+    {
+        $changes = [];
+        $attributes = ['measured_at' => now()];
+
+        foreach (self::MEASURED_FIELDS as $field) {
+            $old = $this->{'measured_'.$field};
+            $new = $values[$field];
+            $attributes['measured_'.$field] = $new;
+
+            if ($old === null || (float) $old !== (float) $new) {
+                $scale = $field === 'cycle_time' ? 1000 : 1;
+                $changes[] = [
+                    'field' => $field,
+                    'from' => $old === null ? null : round((float) $old / $scale, 3),
+                    'to' => round((float) $new / $scale, 3),
+                ];
+            }
+        }
+
+        $this->update($attributes);
+
+        return $changes;
+    }
+
+    /** Appends a signed entry to the production protocol and stores the (clamped) current quantity. */
+    public function appendProtocolEntry(int $quantity, string $type, ?string $note = null, array $meta = []): static
+    {
+        $protocol = is_array($this->production_protocol) ? $this->production_protocol : [];
+        $entries = is_array($protocol['entries'] ?? null) ? $protocol['entries'] : [];
+        $quantity = max(0, min($quantity, (int) $this->quantity));
+
+        $entries[] = [
+            'timestamp' => now()->toIso8601String(),
+            'entry_type' => $type,
+            'current_quantity' => $quantity,
+            'note' => $note,
+            'meta' => $meta,
+            'signed_by' => Auth::user()?->name ?? 'API',
+            'signed_by_user_id' => Auth::id(),
+        ];
+
+        $this->update([
+            'current_quantity' => $quantity,
+            'production_protocol' => array_merge($protocol, ['entries' => $entries]),
+        ]);
+
+        return $this->refresh();
+    }
+
+    /** Pauses every running order matching the column constraints and logs the reason in their protocols. */
+    public static function pauseRunning(array $constraints, string $reason): void
+    {
+        static::query()->where('status', 'in_progress')->where($constraints)->each(function (Order $order) use ($reason): void {
+            $order->update([
+                'status' => 'paused',
+                'pause_description' => $reason,
+                'last_paused_at' => now(),
+                'good_quantity' => $order->good_quantity ?: $order->current_quantity,
+            ]);
+            $order->appendProtocolEntry((int) $order->current_quantity, 'issue', $reason);
+        });
     }
 
     public function dailyCounts(): HasMany
