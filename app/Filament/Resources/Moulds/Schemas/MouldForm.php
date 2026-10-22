@@ -42,10 +42,11 @@ class MouldForm
                     ->searchable()
                     ->preload()
                     ->getOptionLabelFromRecordUsing(fn ($record) => "{$record->name} ({$record->open_mm} mm)")
-                    ->modifyQueryUsing(fn ($query, $get) => $query->when(
-                        filled($get('open_mm')),
-                        fn ($q) => $q->where('open_mm', '>=', (float) $get('open_mm'))
-                    )),
+                    // ->modifyQueryUsing(fn ($query, $get) => $query->when(
+                    //     filled($get('open_mm')),
+                    //     fn ($q) => $q->where('open_mm', '>=', (float) $get('open_mm'))
+                    // ))
+                    ,
                 Textarea::make('description')
                     ->columnSpanFull(),
                 Select::make('status')

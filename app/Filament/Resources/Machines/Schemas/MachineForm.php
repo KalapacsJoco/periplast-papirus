@@ -40,10 +40,11 @@ class MachineForm
                     ->searchable()
                     ->preload()
                     ->getOptionLabelFromRecordUsing(fn ($record) => "{$record->name} ({$record->open_mm} mm)")
-                    ->modifyQueryUsing(fn ($query, $get) => $query->when(
-                        filled($get('open_mm')),
-                        fn ($q) => $q->where('open_mm', '<=', (float) $get('open_mm'))
-                    )),
+                    // ->modifyQueryUsing(fn ($query, $get) => $query->when(
+                    //     filled($get('open_mm')),
+                    //     fn ($q) => $q->where('open_mm', '<=', (float) $get('open_mm'))
+                    // )
+                    ,
                 Textarea::make('problem_description')
                     ->label('Problem Description')
                     ->placeholder('Describe the issue or maintenance needed...')

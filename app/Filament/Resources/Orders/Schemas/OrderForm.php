@@ -26,7 +26,8 @@ class OrderForm
                     ->label('Expected production end')
                     ->afterOrEqual('date'),
                 TextInput::make('customer')
-                    ->required(),
+                    // ->required()
+                    ,
                 TextInput::make('quantity')
                     ->numeric()
                     ->integer()
