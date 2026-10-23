@@ -17,12 +17,21 @@ class MachineForm
                     ->required(),
                 TextInput::make('type')
                     ->required(),
-                TextInput::make('open_mm')
+                // TextInput::make('open_mm')
+                //     ->numeric()
+                //     ->suffix('mm'),
+                TextInput::make('screw_diameter_mm')
                     ->numeric()
                     ->suffix('mm'),
-                TextInput::make('screw_diameter_cm')
+                TextInput::make('opening')
                     ->numeric()
-                    ->suffix('cm'),
+                    ->suffix('mm'),
+                TextInput::make('closing')
+                    ->numeric()
+                    ->suffix('mm'),
+                TextInput::make('pressure')
+                    ->numeric()
+                    ->suffix('bar'),
                 Textarea::make('description')
                     ->columnSpanFull(),
                 Select::make('status')

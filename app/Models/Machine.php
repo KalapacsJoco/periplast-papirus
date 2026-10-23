@@ -12,7 +12,7 @@ class Machine extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'type', 'open_mm', 'screw_diameter_cm', 'description', 'status', 'problem_description'];
+    protected $fillable = ['name', 'type', 'screw_diameter_cm', 'description', 'status', 'problem_description', 'opening', 'closing', 'pressure'];
 
     public function maintenances(): HasMany
     {
