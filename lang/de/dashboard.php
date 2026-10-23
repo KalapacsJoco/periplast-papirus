@@ -236,6 +236,9 @@ return [
     'measured_color_percentage' => 'Gemessener Farbanteil',
     'measured_data_saved_note' => 'Messwerte (Zykluszeit, Netto-/Bruttogewicht, Farbanteil) aktualisiert.',
     'help' => 'Hilfe',
+    'pressure' => 'Spritzdruck',
+    'closing' => 'Einbauhöhe',
+    'repair_log' => 'Reparaturprotokoll',
     'help_intro' => 'Diese Hilfe fasst zusammen, was die Papirus-Produktionsüberwachung aktuell kann und wie sie bedient wird. Menüpunkte und Schaltflächen erscheinen abhängig von den Rechten des angemeldeten Benutzers.',
     'help_sections' => [
         [

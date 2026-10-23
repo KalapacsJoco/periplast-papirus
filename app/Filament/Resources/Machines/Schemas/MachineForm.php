@@ -20,9 +20,9 @@ class MachineForm
                 // TextInput::make('open_mm')
                 //     ->numeric()
                 //     ->suffix('mm'),
-                TextInput::make('screw_diameter_mm')
+                TextInput::make('screw_diameter_cm')
                     ->numeric()
-                    ->suffix('mm'),
+                    ->suffix('cm'),
                 TextInput::make('opening')
                     ->numeric()
                     ->suffix('mm'),

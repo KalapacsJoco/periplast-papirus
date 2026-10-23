@@ -235,7 +235,10 @@ return [
     'measured_gross_weight' => 'Mért bruttó súly',
     'measured_color_percentage' => 'Mért színszázalék',
     'measured_data_saved_note' => 'Mért adatok (ciklusidő, nettó/bruttó súly, színszázalék) frissítve.',
+    'pressure' => 'Fröccsnyomás',
+    'closing' => 'Zárásmagasság',
     'help' => 'Súgó',
+    'repair_log' => 'Javítási napló',
     'help_intro' => 'Ez a súgó összefoglalja, mit tud jelenleg a Papirus termelésfigyelő felület, és hogyan kell használni. A menüpontok és gombok a bejelentkezett felhasználó jogosultságától függően jelennek meg.',
     'help_sections' => [
         [
