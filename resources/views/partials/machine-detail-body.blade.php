@@ -31,7 +31,7 @@
                 </div>
             </dl>
             <button
-                class="rounded-md border w-3/5 border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
+                class="rounded-md border w-1/2 border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
                 {{ $this->t('repair_log') }}
             </button>
             @if ($detail->problem_description)
@@ -92,7 +92,7 @@
                 @endif
             </dl>
             <button
-                class="mt-2 rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
+                class="mt-2 w-1/2 rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
                 {{ $this->t('repair_log') }}
             </button>
             @if ($detailMould->problem_description)
