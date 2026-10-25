@@ -238,6 +238,8 @@ return [
     'pressure' => 'Fröccsnyomás',
     'closing' => 'Zárásmagasság',
     'help' => 'Súgó',
+    'hot_channel_system' => 'Melegbeömlős rendszer',
+    'temper_water_circuit' => 'Szerszám fűtés',
     'repair_log' => 'Javítási napló',
     'help_intro' => 'Ez a súgó összefoglalja, mit tud jelenleg a Papirus termelésfigyelő felület, és hogyan kell használni. A menüpontok és gombok a bejelentkezett felhasználó jogosultságától függően jelennek meg.',
     'help_sections' => [

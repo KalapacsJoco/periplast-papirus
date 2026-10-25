@@ -29,11 +29,11 @@
                     <dt class="text-slate-500">{{ $this->t('closing') }}</dt>
                     <dd class="font-semibold">{{ $detail->closing ?? '-' }} mm</dd>
                 </div>
-                <button
-                    class="rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
-                    {{ $this->t('repair_log') }}
-                </button>
             </dl>
+            <button
+                class="rounded-md border w-3/5 border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
+                {{ $this->t('repair_log') }}
+            </button>
             @if ($detail->problem_description)
             <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{
                 $detail->problem_description }}</p>
@@ -58,11 +58,43 @@
                     <dt class="text-slate-500">{{ $this->t('number') }}</dt>
                     <dd class="font-semibold">{{ $detailMould->number ?? '-' }}</dd>
                 </div>
-                <button
-                    class="mt-2 rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
-                    {{ $this->t('repair_log') }}
-                </button>
+                @if ($detailMould->temper)
+                <div>
+                    <dt class="text-slate-500">{{ $this->t('temper_water_circuit') }}</dt>
+                    <dd class="font-semibold">{{ $detailMould->temper_water_circuit }}</dd>
+                </div>
+                @endif
+
+                {{-- @if ($detailMould->hot_channel_count !== null)
+                <div>
+                    <dt class="text-slate-500">{{ $this->t('hot_channel_count') }}</dt>
+                    <dd class="font-semibold">{{ $detailMould->hot_channel_count }}</dd>
+                </div>
+                @endif --}}
+
+                @if ($detailMould->hot_channel_5a || $detailMould->hot_channel_220v)
+                <div>
+                    <dt class="text-slate-500">{{ $this->t('hot_channel_system') }}</dt>
+                    <dd class="font-semibold">
+                        @if ($detailMould->hot_channel_5a)
+                        5 A
+                        @endif
+
+                        @if ($detailMould->hot_channel_5a && $detailMould->hot_channel_220v)
+                        /
+                        @endif
+
+                        @if ($detailMould->hot_channel_220v)
+                        220 V
+                        @endif
+                    </dd>
+                </div>
+                @endif
             </dl>
+            <button
+                class="mt-2 rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
+                {{ $this->t('repair_log') }}
+            </button>
             @if ($detailMould->problem_description)
             <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{
                 $detailMould->problem_description }}</p>

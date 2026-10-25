@@ -20,6 +20,14 @@ class Mould extends Model
         'description',
         'status',
         'problem_description',
+        'height_mm',
+        'cooling_water_channel',
+        'hot_channel',
+        'hot_channel_count',
+        'hot_channel_5a',
+        'hot_channel_220v',
+        'temper',
+        'temper_water_circuit',
     ];
 
     public function products(): BelongsToMany

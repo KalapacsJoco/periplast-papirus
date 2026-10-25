@@ -238,6 +238,8 @@ return [
     'help' => 'Hilfe',
     'pressure' => 'Spritzdruck',
     'closing' => 'Einbauhöhe',
+    'hot_channel_system' => 'Heißkanalsystem',
+    'temper_water_circuit' => 'Werkzeugheizung',
     'repair_log' => 'Reparaturprotokoll',
     'help_intro' => 'Diese Hilfe fasst zusammen, was die Papirus-Produktionsüberwachung aktuell kann und wie sie bedient wird. Menüpunkte und Schaltflächen erscheinen abhängig von den Rechten des angemeldeten Benutzers.',
     'help_sections' => [

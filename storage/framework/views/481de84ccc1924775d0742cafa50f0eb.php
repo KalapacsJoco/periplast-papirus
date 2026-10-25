@@ -28,12 +28,12 @@
                     <dt class="text-slate-500"><?php echo e($this->t('closing')); ?></dt>
                     <dd class="font-semibold"><?php echo e($detail->closing ?? '-'); ?> mm</dd>
                 </div>
-                <button
-                    class="rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
-                    <?php echo e($this->t('repair_log')); ?>
-
-                </button>
             </dl>
+            <button
+                class="rounded-md border w-3/5 border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
+                <?php echo e($this->t('repair_log')); ?>
+
+            </button>
             <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detail->problem_description): ?>
             <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong><?php echo e($this->t('problem')); ?>:</strong> <?php echo e($detail->problem_description); ?></p>
             <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
@@ -57,12 +57,39 @@
                     <dt class="text-slate-500"><?php echo e($this->t('number')); ?></dt>
                     <dd class="font-semibold"><?php echo e($detailMould->number ?? '-'); ?></dd>
                 </div>
-                <button
-                    class="mt-2 rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
-                    <?php echo e($this->t('repair_log')); ?>
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMould->temper): ?>
+                <div>
+                    <dt class="text-slate-500"><?php echo e($this->t('temper_water_circuit')); ?></dt>
+                    <dd class="font-semibold"><?php echo e($detailMould->temper_water_circuit); ?></dd>
+                </div>
+                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
 
-                </button>
+                
+
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMould->hot_channel_5a || $detailMould->hot_channel_220v): ?>
+                <div>
+                    <dt class="text-slate-500"><?php echo e($this->t('hot_channel_system')); ?></dt>
+                    <dd class="font-semibold">
+                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMould->hot_channel_5a): ?>
+                        5 A
+                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+
+                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMould->hot_channel_5a && $detailMould->hot_channel_220v): ?>
+                        /
+                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+
+                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMould->hot_channel_220v): ?>
+                        220 V
+                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                    </dd>
+                </div>
+                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
             </dl>
+            <button
+                class="mt-2 rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
+                <?php echo e($this->t('repair_log')); ?>
+
+            </button>
             <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($detailMould->problem_description): ?>
             <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong><?php echo e($this->t('problem')); ?>:</strong> <?php echo e($detailMould->problem_description); ?></p>
             <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
