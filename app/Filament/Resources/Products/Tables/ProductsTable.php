@@ -27,6 +27,10 @@ class ProductsTable
                 TextColumn::make('color.name')
                     ->label('Szin')
                     ->searchable(),
+                TextColumn::make('color_percentage')
+                    ->label('Szín aránya')
+                    ->numeric(decimalPlaces: 2)
+                    ->suffix('%'),
                 TextColumn::make('additives.name')
                     ->label('Adalekanyagok')
                     ->listWithLineBreaks()

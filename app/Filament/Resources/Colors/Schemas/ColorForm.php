@@ -17,6 +17,7 @@ class ColorForm
                 TextInput::make('code')->required()->unique(ignoreRecord: true),
                 Toggle::make('is_active')->default(true)->required(),
                 Textarea::make('description')->columnSpanFull(),
+                TextInput::make('place'),
             ]);
     }
 }

@@ -18,6 +18,7 @@ class Product extends Model
         'customer_code',
         'material_id',
         'color_id',
+        'color_percentage',
         'planned_cycle_time',
         'description',
         'is_active',
@@ -25,6 +26,7 @@ class Product extends Model
 
     protected $casts = [
         'is_active' => 'boolean',
+        'color_percentage' => 'decimal:2',
     ];
 
     public function material(): BelongsTo
@@ -44,7 +46,12 @@ class Product extends Model
 
     public function additives(): BelongsToMany
     {
-        return $this->belongsToMany(Additive::class);
+        return $this->belongsToMany(Additive::class)->withPivot('percentage')->withTimestamps();
+    }
+
+    public function additiveSettings(): HasMany
+    {
+        return $this->hasMany(ProductAdditive::class, 'product_id');
     }
 
     public function inserts(): HasMany

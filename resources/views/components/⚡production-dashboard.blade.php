@@ -79,8 +79,6 @@ new class extends Component
 
     public string $qualityProblemNote = '';
 
-    public string $resolutionDescription = '';
-
     public string $protocolEntryType = 'note';
 
     public string $protocolEntryNote = '';
@@ -253,9 +251,9 @@ new class extends Component
         $order = $machine->productionMetrics()->currentOrder();
 
         if (
-            in_array($machine->status, ['stopped', 'broken'], true)
+            ! in_array($machine->status, ['active', 'warning', 'setup'], true)
             || ($order !== null && (
-                in_array($order->mould?->status, ['needs_repair', 'under_repair'], true)
+                ! in_array($order->mould?->status, ['active', 'warning'], true)
                 || $this->qualityStatus($order) === 'quality_issue'
             ))
         ) {
@@ -446,23 +444,6 @@ new class extends Component
         $this->detailMachineId = null;
     }
 
-    /** True when the open modal would restart equipment or production that was stopped by a fault. */
-    public function requiresResolution(): bool
-    {
-        if ($this->showQualityModal && $this->qualityOrderId) {
-            $order = Order::find($this->qualityOrderId);
-
-            return $order !== null && $this->qualityStatus($order) === 'quality_issue' && $this->qualityStatus !== 'quality_issue';
-        }
-
-        return false;
-    }
-
-    private function resolutionNote(): string
-    {
-        return $this->t('resolution_note', ['text' => $this->resolutionDescription]);
-    }
-
     public function openOrderModal(int $orderId): void
     {
         $this->ensurePermission(Role::PAUSE_ORDER, Role::INTERRUPT_ORDER);
@@ -504,6 +485,19 @@ new class extends Component
             'current_quantity' => $quantity,
         ];
 
+        if ($validated['orderStatus'] === 'in_progress') {
+            abort_unless($order->canRunProduction(), 422, $this->t('production_blocked_by_issue'));
+            $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
+            $protocol['automatic_pause'] = null;
+            $updates['production_protocol'] = $protocol;
+        }
+
+        if ($validated['orderStatus'] === 'paused') {
+            $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
+            $protocol['automatic_pause'] = null;
+            $updates['production_protocol'] = $protocol;
+        }
+
         if ($validated['orderStatus'] === 'in_progress' && ! $order->started_at) {
             $updates['started_at'] = now();
         }
@@ -535,11 +529,15 @@ new class extends Component
         $this->ensurePermission(Role::ACTIVATE_ORDER);
         $order = Order::findOrFail($orderId);
         abort_unless(in_array($order->status, ['waiting', 'paused'], true), 422);
+        abort_unless($order->canRunProduction(), 422, $this->t('production_blocked_by_issue'));
+        $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
+        $protocol['automatic_pause'] = null;
         $order->update([
             'status' => 'in_progress',
             'started_at' => $order->started_at ?? now(),
             'activated_at' => $order->status === 'waiting' ? now() : $order->activated_at,
             'last_paused_at' => null,
+            'production_protocol' => $protocol,
         ]);
         $order->appendProtocolEntry($order->current_quantity, 'order_status', $this->t('order_activated_note'));
         if (Auth::user()->role === Role::Programmer) {
@@ -598,6 +596,12 @@ new class extends Component
     {
         $this->ensurePermission(Role::CHECK_QUALITY, Role::CHECK_COLOR);
         $order = Order::findOrFail($orderId);
+        if ($this->hasOpenQualityIssues($order)) {
+            $this->flashMessage = $this->t('resolve_quality_issue_first');
+
+            return;
+        }
+
         if (! $order->hasMeasuredData()) {
             $this->flashMessage = $this->t('measured_data_required');
 
@@ -608,7 +612,6 @@ new class extends Component
         $this->qualityStatus = 'good';
         $this->qualityProblemType = $this->qualityProblemTypes()[0];
         $this->qualityProblemNote = '';
-        $this->resolutionDescription = '';
         $this->quantityWarning = '';
         $this->resetValidation();
         $this->showQualityModal = true;
@@ -630,17 +633,16 @@ new class extends Component
     public function saveQualityCheck(bool $confirmed = false): void
     {
         $this->ensurePermission(Role::CHECK_QUALITY, Role::CHECK_COLOR);
+        $order = Order::findOrFail($this->qualityOrderId);
+        abort_unless(! $this->hasOpenQualityIssues($order), 422, $this->t('resolve_quality_issue_first'));
         $isColorCheck = $this->isColorCheckOnly();
         $validated = $this->validate([
             'qualityStatus' => ['required', Rule::in(['good', 'warning', 'quality_issue'])],
             'currentQuantity' => ['required', 'integer', 'min:0'],
             'qualityProblemType' => ['required_unless:qualityStatus,good', 'nullable', Rule::in($this->qualityProblemTypes())],
             'qualityProblemNote' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->qualityStatus !== 'good')],
-            'resolutionDescription' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->requiresResolution())],
         ]);
-        $resolved = $this->requiresResolution();
 
-        $order = Order::findOrFail($this->qualityOrderId);
         abort_unless($order->hasMeasuredData(), 422, $this->t('measured_data_required'));
         $quantity = min($validated['currentQuantity'], $order->quantity);
 
@@ -664,6 +666,22 @@ new class extends Component
 
         $protocol = $order->production_protocol ?? [];
         $checks = $protocol['quality_checks'] ?? [];
+        $qualityIssues = $protocol['quality_issues'] ?? [];
+        $qualityIssueId = null;
+
+        if ($validated['qualityStatus'] === 'quality_issue') {
+            $qualityIssueId = (string) Str::uuid();
+            $qualityIssues[] = [
+                'id' => $qualityIssueId,
+                'status' => 'open',
+                'problem_type' => $validated['qualityProblemType'],
+                'problem_note' => $validated['qualityProblemNote'],
+                'reported_at' => now()->toIso8601String(),
+                'signed_by' => Auth::user()->name,
+                'signed_by_user_id' => Auth::id(),
+            ];
+        }
+
         $checks[] = [
             'checked_at' => now()->toIso8601String(),
             'quality_status' => $validated['qualityStatus'],
@@ -680,16 +698,15 @@ new class extends Component
                 'quality_status' => $validated['qualityStatus'],
                 'last_quality_check_at' => now()->toIso8601String(),
                 'quality_checks' => $checks,
+                'quality_issues' => $qualityIssues,
             ]),
         ];
 
-        if ($followUpStatus === 'stopped' && $order->status === 'in_progress') {
-            $orderUpdates['status'] = 'paused';
-            $orderUpdates['pause_description'] = $this->t('quality_paused_reason');
-            $orderUpdates['last_paused_at'] = now();
+        $order->update($orderUpdates);
+        if ($qualityIssueId !== null) {
+            $order->pauseForIssue('quality:'.$qualityIssueId, $validated['qualityProblemNote']);
         }
 
-        $order->update($orderUpdates);
         if ($order->machine?->status === 'setup' && $order->hasMeasuredData()) {
             $order->machine->update(['status' => 'active', 'problem_description' => null]);
             unset($this->machines, $this->detailMachine, $this->expandedMachine);
@@ -697,8 +714,7 @@ new class extends Component
         $order->appendProtocolEntry($quantity,
             'quality_check',
             $this->t('quality_check_note', ['status' => $this->statusLabel($validated['qualityStatus'])])
-                .($validated['qualityStatus'] !== 'good' && filled($validated['qualityProblemNote'] ?? null) ? ': '.$validated['qualityProblemNote'] : '')
-                .($resolved ? ' — '.$this->resolutionNote() : ''),
+                .($validated['qualityStatus'] !== 'good' && filled($validated['qualityProblemNote'] ?? null) ? ': '.$validated['qualityProblemNote'] : ''),
             ['quality_status' => $validated['qualityStatus']]
         );
 
@@ -793,11 +809,19 @@ new class extends Component
         $stop = $this->protocolStopsProduction;
 
         if ($type === 'resolved') {
-            $this->ensurePermission(Role::START_MACHINE);
-            $problems = $this->openProblems($order);
+            $problems = array_filter(
+                $this->openProblems($order),
+                fn (array $problem, string $target): bool => $this->canResolveProblem($target),
+                ARRAY_FILTER_USE_BOTH,
+            );
             $this->validate(['protocolResolveTarget' => ['required', Rule::in(array_keys($problems))]]);
             $target = $this->protocolResolveTarget;
             $problem = $problems[$target];
+            if (str_starts_with($target, 'quality:')) {
+                $this->ensurePermission(Role::START_MACHINE, Role::CHECK_QUALITY, Role::CHECK_COLOR);
+            } else {
+                $this->ensurePermission(Role::START_MACHINE);
+            }
             $note = $this->t('protocol_resolved_note', [
                 'target' => $problem['label'],
                 'problem' => $problem['description'],
@@ -821,10 +845,6 @@ new class extends Component
             'resolved' => $this->resolveProblem($problem, $target),
             default => null,
         };
-
-        if ($type === 'mould_issue' && $stop && $order->mould_id) {
-            Order::pauseRunning(['mould_id' => $order->mould_id], $note);
-        }
 
         unset($this->machines);
         $this->protocolEntryNote = '';
@@ -938,6 +958,10 @@ new class extends Component
     public function qualityStatus(Order $order): string
     {
         $protocol = $order->production_protocol ?? [];
+        if ($this->hasOpenQualityIssues($order)) {
+            return 'quality_issue';
+        }
+
         $qualityStatus = $protocol['quality_status'] ?? null;
 
         if (in_array($qualityStatus, ['good', 'warning', 'quality_issue'], true)) {
@@ -986,28 +1010,84 @@ new class extends Component
         };
     }
 
-    /** Restores the equipment and resumes the orders that were paused because of this exact problem. */
+    /** Resolves a selected equipment or quality fault and resumes only automatically paused orders that are ready. */
     private function resolveProblem(array $problem, string $target): void
     {
-        $equipment = $problem['equipment'];
-        $reason = $equipment->problem_description;
+        if (str_starts_with($target, 'quality:')) {
+            /** @var Order $order */
+            $order = $problem['order'];
+            $issueId = substr($target, strlen('quality:'));
+            $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
+            $issues = is_array($protocol['quality_issues'] ?? null) ? $protocol['quality_issues'] : [];
+            $resolvedIssue = false;
 
-        $equipment->update(['status' => 'active', 'problem_description' => null]);
+            foreach ($issues as &$issue) {
+                if (is_array($issue) && (string) ($issue['id'] ?? '') === $issueId && ($issue['status'] ?? 'open') === 'open') {
+                    $issue['status'] = 'resolved';
+                    $issue['resolved_at'] = now()->toIso8601String();
+                    $issue['resolution'] = $this->protocolEntryNote;
+                    $issue['resolved_by'] = Auth::user()->name;
+                    $issue['resolved_by_user_id'] = Auth::id();
+                    $resolvedIssue = true;
 
-        if ($reason) {
-            Order::query()
-                ->where($target.'_id', $equipment->id)
-                ->where('status', 'paused')
-                ->where('pause_description', $reason)
-                ->update(['status' => 'in_progress', 'pause_description' => null, 'last_paused_at' => null]);
+                    break;
+                }
+            }
+            unset($issue);
+
+            if ($issueId === 'legacy' && ! $resolvedIssue) {
+                $protocol['legacy_quality_resolution'] = [
+                    'resolved_at' => now()->toIso8601String(),
+                    'resolution' => $this->protocolEntryNote,
+                    'resolved_by' => Auth::user()->name,
+                    'resolved_by_user_id' => Auth::id(),
+                ];
+                $resolvedIssue = true;
+            }
+
+            abort_unless($resolvedIssue, 422);
+            $protocol['quality_issues'] = $issues;
+            $protocol['quality_status'] = collect($issues)
+                ->contains(fn ($issue): bool => is_array($issue) && ($issue['status'] ?? 'open') === 'open')
+                    ? 'quality_issue'
+                    : 'good';
+            $order->update(['production_protocol' => $protocol]);
+
+            $cause = 'quality:'.$issueId;
+            if ($issueId === 'legacy' && $order->status === 'paused' && ! is_array($protocol['automatic_pause'] ?? null)
+                && $order->pause_description === $this->t('quality_paused_reason')) {
+                $protocol['automatic_pause'] = ['causes' => [$cause]];
+                $order->update(['production_protocol' => $protocol]);
+            }
+
+            $order->resolveIssuePause($cause);
+
+            return;
         }
+
+        $equipment = $problem['equipment'];
+        $equipment->update(['status' => 'active', 'problem_description' => null]);
+        Order::resolveEquipmentIssue($target, $equipment->id);
     }
 
-    /** Machine/mould of the order that currently carry a warning or fault, keyed by target. */
+    private function hasOpenQualityIssues(Order $order): bool
+    {
+        $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
+        $issues = is_array($protocol['quality_issues'] ?? null) ? $protocol['quality_issues'] : [];
+
+        if (collect(is_array($issues) ? $issues : [])
+            ->contains(fn ($issue): bool => is_array($issue) && ($issue['status'] ?? 'open') === 'open')) {
+            return true;
+        }
+
+        return $issues === [] && ($protocol['quality_status'] ?? null) === 'quality_issue';
+    }
+
+    /** Equipment and unresolved quality faults that can be selected for resolution. */
     public function openProblems(Order $order): array
     {
         $problems = [];
-        $faulty = ['warning', 'stopped', 'broken', 'needs_repair', 'under_repair'];
+        $faulty = ['warning', 'stopped', 'broken', 'inactive', 'maintenance', 'standby', 'needs_repair', 'under_repair'];
 
         foreach (['machine' => $order->machine, 'mould' => $order->mould] as $target => $equipment) {
             if ($equipment && in_array($equipment->status, $faulty, true)) {
@@ -1020,7 +1100,42 @@ new class extends Component
             }
         }
 
+        $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
+        $qualityIssues = is_array($protocol['quality_issues'] ?? null) ? $protocol['quality_issues'] : [];
+        foreach (is_array($qualityIssues) ? $qualityIssues : [] as $issue) {
+            if (! is_array($issue) || ($issue['status'] ?? 'open') !== 'open' || blank($issue['id'] ?? null)) {
+                continue;
+            }
+
+            $problems['quality:'.$issue['id']] = [
+                'label' => $this->t('protocol_target_quality'),
+                'description' => $this->t($issue['problem_type'] ?? 'other').': '.($issue['problem_note'] ?? ''),
+                'status' => 'quality_issue',
+                'order' => $order,
+            ];
+        }
+
+        if ($qualityIssues === [] && ($protocol['quality_status'] ?? null) === 'quality_issue') {
+            $lastIssue = collect($protocol['quality_checks'] ?? [])
+                ->last(fn ($check): bool => is_array($check) && ($check['quality_status'] ?? null) === 'quality_issue');
+            $problems['quality:legacy'] = [
+                'label' => $this->t('protocol_target_quality'),
+                'description' => filled(data_get($lastIssue, 'problem_note'))
+                    ? data_get($lastIssue, 'problem_note')
+                    : $this->t('quality_issue'),
+                'status' => 'quality_issue',
+                'order' => $order,
+            ];
+        }
+
         return $problems;
+    }
+
+    public function canResolveProblem(string $target): bool
+    {
+        return str_starts_with($target, 'quality:')
+            ? $this->canDo(Role::START_MACHINE) || $this->canDo(Role::CHECK_QUALITY) || $this->canDo(Role::CHECK_COLOR)
+            : $this->canDo(Role::START_MACHINE);
     }
 };
 ?>
@@ -1531,27 +1646,23 @@ new class extends Component
                         <div class="mt-3 grid gap-3">
                             <label class="text-sm font-semibold">{{ $this->t('protocol_entry_type') }}
                                 <select wire:model.live="protocolEntryType" class="mt-1 w-full rounded-md border-slate-300">
-                                    @php($openProblems = $this->openProblems($protocolOrder))
+                                    @php($openProblems = array_filter($this->openProblems($protocolOrder), fn ($problem, $target) => $this->canResolveProblem($target), ARRAY_FILTER_USE_BOTH))
                                     @foreach (['note', 'parameter_change', 'machine_issue', 'mould_issue', 'other', 'resolved'] as $type)
-                                        @continue($type === 'resolved' && (empty($openProblems) || ! $this->canDo(\App\Enums\Role::START_MACHINE)))
+                                        @continue($type === 'resolved' && empty($openProblems))
                                         <option value="{{ $type }}">{{ $this->t('protocol_type_'.$type) }}</option>
                                     @endforeach
                                 </select>
                             </label>
                             @if ($protocolEntryType === 'resolved' && ! empty($openProblems))
-                                <fieldset class="grid gap-2">
-                                    <legend class="text-sm font-semibold">{{ $this->t('protocol_resolve_which') }}</legend>
+                                <label class="text-sm font-semibold">{{ $this->t('protocol_resolve_which') }}
+                                    <select wire:model="protocolResolveTarget" class="mt-1 w-full rounded-md border-slate-300">
+                                        <option value="">{{ $this->t('select_issue') }}</option>
                                     @foreach ($openProblems as $target => $problem)
-                                        <label class="flex items-start gap-2 rounded-md border border-slate-200 p-2 text-sm">
-                                            <input type="radio" wire:model="protocolResolveTarget" value="{{ $target }}" class="mt-1">
-                                            <span>
-                                                <span @class(['rounded-full px-2 py-0.5 text-xs font-bold', $this->statusClass($problem['status'])])>{{ $problem['label'] }} · {{ $this->statusLabel($problem['status']) }}</span>
-                                                <span class="mt-1 block text-slate-700">{{ $problem['description'] }}</span>
-                                            </span>
-                                        </label>
+                                        <option value="{{ $target }}">{{ $problem['label'] }} · {{ $this->statusLabel($problem['status']) }} — {{ $problem['description'] }}</option>
                                     @endforeach
+                                    </select>
                                     @error('protocolResolveTarget')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
-                                </fieldset>
+                                </label>
                             @endif
                             @if (in_array($protocolEntryType, ['machine_issue', 'mould_issue', 'other'], true))
                                 <label class="flex items-center gap-2 text-sm font-semibold">
@@ -1560,7 +1671,7 @@ new class extends Component
                                 </label>
                                 <p class="-mt-2 text-xs text-slate-500">{{ $this->t('protocol_stops_production_hint') }}</p>
                             @endif
-                            <label class="text-sm font-semibold">{{ $this->t('protocol_entry_note') }}
+                            <label class="text-sm font-semibold">{{ $this->t($protocolEntryType === 'resolved' ? 'resolution_description' : 'protocol_entry_note') }}
                                 <textarea wire:model="protocolEntryNote" rows="3" maxlength="2000" class="mt-1 w-full rounded-md border-slate-300"></textarea>
                                 @error('protocolEntryNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
                             </label>
@@ -1594,7 +1705,52 @@ new class extends Component
     @endif
 
     @if ($showQualityModal)
-        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold">{{ $this->t($this->isColorCheckOnly() ? 'record_color_check' : 'record_quality_check') }}</h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold">{{ $this->t('result') }}<select wire:model.live="qualityStatus" class="mt-1 w-full rounded-md border-slate-300"><option value="good">{{ $this->t('good') }}</option><option value="warning">{{ $this->t('warning') }}</option><option value="quality_issue">{{ $this->t('quality_issue') }}</option></select></label><label class="text-sm font-semibold">{{ $this->t('current_quantity') }}<input wire:model="currentQuantity" wire:input="$set('quantityWarning', '')" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>@if($quantityWarning !== '')<div class="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert"><p class="font-semibold">{{ $quantityWarning }}</p><p class="mt-1">{{ $this->t('quantity_confirm_question') }}</p><div class="mt-3 flex gap-2"><button wire:click="saveQualityCheck(true)" class="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700">{{ $this->t('quantity_confirm_yes') }}</button><button wire:click="$set('quantityWarning', '')" class="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-bold text-amber-900">{{ $this->t('quantity_confirm_edit') }}</button></div></div>@endif@if($qualityStatus !== 'good')<div wire:key="quality-problem-fields-{{ $qualityStatus }}" class="grid gap-4"><label class="text-sm font-semibold">{{ $this->t('problem_type') }}<select wire:model="qualityProblemType" class="mt-1 w-full rounded-md border-slate-300">@foreach ($this->qualityProblemTypes() as $problemType)<option value="{{ $problemType }}">{{ $this->t($problemType) }}</option>@endforeach</select></label><label class="text-sm font-semibold">{{ $this->t('problem_reason') }}<textarea wire:model="qualityProblemNote" rows="3" placeholder="{{ $this->t('problem_reason_placeholder') }}" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('qualityProblemNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label></div>@endif @if ($this->requiresResolution())<label class="text-sm font-semibold">{{ $this->t('resolution_description') }}<textarea wire:model="resolutionDescription" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>@error('resolutionDescription')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>@endif</div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showQualityModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button><button wire:click="saveQualityCheck" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('record') }}</button></div></div></div>
+        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
+            <div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
+                <h2 class="text-xl font-bold">{{ $this->t($this->isColorCheckOnly() ? 'record_color_check' : 'record_quality_check') }}</h2>
+                <div class="mt-5 grid gap-4">
+                    <label class="text-sm font-semibold">{{ $this->t('result') }}
+                        <select wire:model.live="qualityStatus" class="mt-1 w-full rounded-md border-slate-300">
+                            <option value="good">{{ $this->t('good') }}</option>
+                            <option value="warning">{{ $this->t('warning') }}</option>
+                            <option value="quality_issue">{{ $this->t('quality_issue') }}</option>
+                        </select>
+                    </label>
+                    <label class="text-sm font-semibold">{{ $this->t('current_quantity') }}
+                        <input wire:model="currentQuantity" wire:input="$set('quantityWarning', '')" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300">
+                    </label>
+                    @if ($quantityWarning !== '')
+                        <div class="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+                            <p class="font-semibold">{{ $quantityWarning }}</p>
+                            <p class="mt-1">{{ $this->t('quantity_confirm_question') }}</p>
+                            <div class="mt-3 flex gap-2">
+                                <button wire:click="saveQualityCheck(true)" class="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700">{{ $this->t('quantity_confirm_yes') }}</button>
+                                <button wire:click="$set('quantityWarning', '')" class="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-bold text-amber-900">{{ $this->t('quantity_confirm_edit') }}</button>
+                            </div>
+                        </div>
+                    @endif
+                    @if ($qualityStatus !== 'good')
+                        <div wire:key="quality-problem-fields-{{ $qualityStatus }}" class="grid gap-4">
+                            <label class="text-sm font-semibold">{{ $this->t('problem_type') }}
+                                <select wire:model="qualityProblemType" class="mt-1 w-full rounded-md border-slate-300">
+                                    @foreach ($this->qualityProblemTypes() as $problemType)
+                                        <option value="{{ $problemType }}">{{ $this->t($problemType) }}</option>
+                                    @endforeach
+                                </select>
+                            </label>
+                            <label class="text-sm font-semibold">{{ $this->t('problem_reason') }}
+                                <textarea wire:model="qualityProblemNote" rows="3" placeholder="{{ $this->t('problem_reason_placeholder') }}" class="mt-1 w-full rounded-md border-slate-300"></textarea>
+                                @error('qualityProblemNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
+                            </label>
+                        </div>
+                    @endif
+                </div>
+                <div class="mt-6 flex justify-end gap-3">
+                    <button wire:click="$set('showQualityModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button>
+                    <button wire:click="saveQualityCheck" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('record') }}</button>
+                </div>
+            </div>
+        </div>
     @endif
     @endguest
 </div>

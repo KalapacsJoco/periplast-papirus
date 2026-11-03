@@ -23,6 +23,8 @@ class Order extends Model
         'date',
         'planned_end_date',
         'customer',
+        'material',
+        'color',
         'quantity',
         'current_quantity',
         'good_quantity',
@@ -163,18 +165,114 @@ class Order extends Model
         return $this->refresh();
     }
 
-    /** Pauses every running order matching the column constraints and logs the reason in their protocols. */
-    public static function pauseRunning(array $constraints, string $reason): void
+    public function canRunProduction(): bool
     {
-        static::query()->where('status', 'in_progress')->where($constraints)->each(function (Order $order) use ($reason): void {
-            $order->update([
+        $protocol = is_array($this->production_protocol) ? $this->production_protocol : [];
+        $qualityIssues = $protocol['quality_issues'] ?? [];
+
+        foreach (is_array($qualityIssues) ? $qualityIssues : [] as $issue) {
+            if (is_array($issue) && ($issue['status'] ?? 'open') === 'open') {
+                return false;
+            }
+        }
+
+        $qualityStatus = $protocol['quality_status'] ?? null;
+
+        if ($qualityStatus === null) {
+            $checks = $protocol['quality_checks'] ?? [];
+            $lastCheck = is_array($checks) ? end($checks) : null;
+            $qualityStatus = is_array($lastCheck) ? ($lastCheck['quality_status'] ?? 'good') : 'good';
+        }
+
+        return in_array($qualityStatus, ['good', 'warning'], true)
+            && in_array($this->machine?->status, ['active', 'warning'], true)
+            && in_array($this->mould?->status, ['active', 'warning'], true);
+    }
+
+    public function pauseForIssue(string $cause, string $reason): bool
+    {
+        $protocol = is_array($this->production_protocol) ? $this->production_protocol : [];
+        $automaticPause = $protocol['automatic_pause'] ?? null;
+
+        if ($this->status === 'in_progress') {
+            $automaticPause = ['causes' => []];
+            $protocol['automatic_pause'] = $automaticPause;
+            $this->update([
                 'status' => 'paused',
                 'pause_description' => $reason,
                 'last_paused_at' => now(),
-                'good_quantity' => $order->good_quantity ?: $order->current_quantity,
+                'good_quantity' => $this->good_quantity ?: $this->current_quantity,
+                'production_protocol' => $protocol,
             ]);
-            $order->appendProtocolEntry((int) $order->current_quantity, 'issue', $reason);
-        });
+        } elseif ($this->status !== 'paused' || ! is_array($automaticPause)) {
+            return false;
+        }
+
+        $causes = is_array($automaticPause['causes'] ?? null) ? $automaticPause['causes'] : [];
+        $causes[] = $cause;
+        $protocol['automatic_pause']['causes'] = array_values(array_unique($causes));
+        $this->update(['production_protocol' => $protocol]);
+        $this->appendProtocolEntry((int) $this->current_quantity, 'issue', $reason);
+
+        return true;
+    }
+
+    public function resolveIssuePause(string $cause): bool
+    {
+        $protocol = is_array($this->production_protocol) ? $this->production_protocol : [];
+        $automaticPause = $protocol['automatic_pause'] ?? null;
+
+        if ($this->status !== 'paused' || ! is_array($automaticPause)) {
+            return false;
+        }
+
+        $existingCauses = is_array($automaticPause['causes'] ?? null) ? $automaticPause['causes'] : [];
+        if ($existingCauses !== [] && ! in_array($cause, $existingCauses, true)) {
+            return false;
+        }
+
+        $causes = array_values(array_filter($existingCauses, fn ($existingCause): bool => $existingCause !== $cause));
+
+        if ($causes !== []) {
+            $protocol['automatic_pause']['causes'] = $causes;
+            $this->update(['production_protocol' => $protocol]);
+
+            return false;
+        }
+
+        $protocol['automatic_pause']['causes'] = [];
+        $this->update(['production_protocol' => $protocol]);
+
+        if (! $this->canRunProduction()) {
+            return false;
+        }
+
+        $protocol['automatic_pause'] = null;
+        $this->update([
+            'status' => 'in_progress',
+            'pause_description' => null,
+            'last_paused_at' => null,
+            'production_protocol' => $protocol,
+        ]);
+        $this->appendProtocolEntry((int) $this->current_quantity, 'order_status', __('dashboard.production_resumed_note'));
+
+        return true;
+    }
+
+    public static function pauseForEquipmentIssue(string $equipment, int $equipmentId, string $reason): void
+    {
+        static::query()
+            ->where($equipment.'_id', $equipmentId)
+            ->whereIn('status', ['in_progress', 'paused'])
+            ->each(fn (Order $order) => $order->pauseForIssue($equipment.':'.$equipmentId, $reason));
+    }
+
+    public static function resolveEquipmentIssue(string $equipment, int $equipmentId): void
+    {
+        static::query()
+            ->where($equipment.'_id', $equipmentId)
+            ->where('status', 'paused')
+            ->each(fn (Order $order) => $order->resolveIssuePause($equipment.':'.$equipmentId));
     }
 
     public function dailyCounts(): HasMany
@@ -200,5 +298,15 @@ class Order extends Model
     public function assignedOperator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assigned_operator_id');
+    }
+
+    public function color(): BelongsTo
+    {
+        return $this->belongsTo(Color::class, 'color', 'code');
+    }
+
+    public function material(): BelongsTo
+    {
+        return $this->belongsTo(Material::class, 'material', 'code');
     }
 }

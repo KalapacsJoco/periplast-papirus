@@ -11,9 +11,32 @@ class Mould extends Model
 {
     use HasFactory;
 
+    protected static function booted(): void
+    {
+        static::updated(function (Mould $mould): void {
+            if (! $mould->wasChanged('status')) {
+                return;
+            }
+
+            if (in_array($mould->status, ['standby', 'needs_repair', 'under_repair'], true)) {
+                Order::pauseForEquipmentIssue(
+                    'mould',
+                    $mould->id,
+                    $mould->problem_description ?: $mould->status,
+                );
+
+                return;
+            }
+
+            if (in_array($mould->status, ['active', 'warning'], true)) {
+                Order::resolveEquipmentIssue('mould', $mould->id);
+            }
+        });
+    }
+
     protected $fillable = [
         'name',
-        'type',
+        'place',
         'number',
         'cavity_count',
         'open_mm',

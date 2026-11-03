@@ -2,10 +2,11 @@
 
 namespace App\Filament\Resources\Products\Schemas;
 
-use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Textarea;
-use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Schema;
 
 class ProductForm
@@ -28,11 +29,31 @@ class ProductForm
                     ->relationship('color', 'name')
                     ->searchable()
                     ->preload(),
-                Select::make('additives')
-                    ->relationship('additives', 'name')
-                    ->multiple()
-                    ->searchable()
-                    ->preload(),
+                TextInput::make('color_percentage')
+                    ->label('Szín aránya')
+                    ->numeric()
+                    ->step('0.01')
+                    ->minValue(0)
+                    ->suffix('%'),
+                Repeater::make('additiveSettings')
+                    ->label('Adalékanyagok')
+                    ->relationship()
+                    ->schema([
+                        Select::make('additive_id')
+                            ->label('Adalékanyag')
+                            ->relationship('additive', 'name')
+                            ->searchable()
+                            ->preload()
+                            ->required(),
+                        TextInput::make('percentage')
+                            ->label('Arány')
+                            ->numeric()
+                            ->step('0.01')
+                            ->minValue(0)
+                            ->suffix('%'),
+                    ])
+                    ->columns(2)
+                    ->defaultItems(0),
                 Select::make('moulds')
                     ->relationship('moulds', 'name')
                     ->multiple()
