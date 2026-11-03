@@ -44,6 +44,7 @@ class Order extends Model
         'additives_percentages',
         'production_protocol',
         'status',
+        'requested_status',
         'pause_description',
         'description',
     ];

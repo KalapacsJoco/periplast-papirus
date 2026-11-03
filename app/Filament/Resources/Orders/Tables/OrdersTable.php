@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Orders\Tables;
 
+use App\Models\Order;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -55,15 +56,22 @@ class OrdersTable
                     ->numeric(decimalPlaces: 3)
                     ->sortable(),
                 TextColumn::make('status')
-                    ->searchable()
                     ->sortable()
                     ->badge()
-                    ->colors([
-                        'warning' => 'waiting',
-                        'info' => 'in_progress',
-                        'danger' => 'paused',
-                        'success' => 'completed',
-                    ]),
+                    ->formatStateUsing(fn (string $state, Order $record): string => match ($record->requested_status) {
+                        'completed' => 'Befejezésre vár',
+                        'interrupted' => 'Megszakításra vár',
+                        default => $state,
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        'Befejezésre vár', 'Megszakításra vár', 'waiting' => 'warning',
+                        'in_progress' => 'info',
+                        'paused' => 'danger',
+                        'completed' => 'success',
+                        'interrupted' => 'gray',
+                        default => 'gray',
+                    })
+                    ->searchable(),
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
@@ -86,4 +94,3 @@ class OrdersTable
             ]);
     }
 }
-

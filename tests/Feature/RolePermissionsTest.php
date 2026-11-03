@@ -50,28 +50,72 @@ class RolePermissionsTest extends TestCase
         $programmer = User::factory()->create(['role' => Role::Programmer]);
         $coordinator = User::factory()->create(['role' => Role::Coordinator]);
         $operator = User::factory()->create(['role' => Role::Operator]);
-        $order = Order::factory()->create(['status' => 'in_progress']);
+        $order = $this->makeOrder(['status' => 'in_progress']);
 
-        Livewire::actingAs($programmer)
+        $request = Livewire::actingAs($programmer)
             ->test('production-dashboard')
             ->call('openOrderModal', $order->id)
-            ->set('orderStatus', 'paused')
-            ->call('saveOrder');
+            ->assertSee('Megrendelő befejezése')
+            ->assertSee('Megrendelő megszakítása')
+            ->assertSee('bg-teal-700')
+            ->assertSee('bg-rose-700')
+            ->assertDontSee('Mégsem')
+            ->assertDontSee('Státusz')
+            ->assertDontSeeHtml('wire:model="currentQuantity"')
+            ->assertDontSee('Jó darabok')
+            ->assertDontSee('Rossz darabok')
+            ->assertDontSee('Mentés');
 
-        $this->assertSame('paused', $order->fresh()->status);
-        $this->assertSame('paused', $coordinator->unreadNotifications()->firstOrFail()->data['event']);
-        $this->assertSame('paused', $operator->unreadNotifications()->firstOrFail()->data['event']);
+        $request->call('requestOrderClosure', 'interrupted')
+            ->assertSee('border-rose-400 bg-rose-100');
 
-        Livewire::actingAs($programmer)
+        $this->assertSame('in_progress', $order->fresh()->status);
+        $this->assertSame('interrupted', $order->fresh()->requested_status);
+        $this->assertSame('interruption_requested', $coordinator->unreadNotifications()->firstOrFail()->data['event']);
+        $this->assertSame('interruption_requested', $operator->unreadNotifications()->firstOrFail()->data['event']);
+        $this->assertDatabaseCount('notifications', 2);
+
+        Livewire::actingAs($operator)
             ->test('production-dashboard')
             ->call('openOrderModal', $order->id)
-            ->set('orderStatus', 'interrupted')
-            ->set('goodQuantity', 10)
-            ->set('badQuantity', 0)
+            ->set('goodQuantity', 8)
+            ->set('badQuantity', 2)
             ->call('saveOrder');
 
         $this->assertSame('interrupted', $order->fresh()->status);
-        $this->assertDatabaseCount('notifications', 4);
+        $this->assertNull($order->fresh()->requested_status);
+        $this->assertSame(8, $order->fresh()->good_quantity);
+        $this->assertSame(2, $order->fresh()->bad_quantity);
+
+        Livewire::actingAs($programmer)
+            ->test('production-dashboard')
+            ->call('activateOrder', $order->id);
+
+        $this->assertSame('in_progress', $order->fresh()->status);
+        $this->assertNull($order->fresh()->assigned_operator_id);
+        $this->assertNull($order->fresh()->task_started_at);
+        $this->assertNull($order->fresh()->measured_at);
+
+        Livewire::actingAs($coordinator)
+            ->test('production-dashboard')
+            ->call('assignOperator', $order->id, (string) $operator->id);
+
+        $task = Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('startAssignedTask', $order->id)
+            ->assertSet('showMeasuredModal', true);
+
+        $this->assertSame('setup', $order->machine->fresh()->status);
+        $this->assertNotNull($order->fresh()->task_started_at);
+
+        $task
+            ->set('measuredCycleSeconds', 12.5)
+            ->set('measuredNetWeight', 100)
+            ->set('measuredGrossWeight', 110)
+            ->set('measuredColorPercentage', 2)
+            ->call('saveMeasuredData');
+
+        $this->assertTrue($order->fresh()->hasMeasuredData());
     }
 
     public function test_coordinator_can_assign_an_active_order_to_an_operator(): void
@@ -218,7 +262,7 @@ class RolePermissionsTest extends TestCase
             'started_at' => now()->subHour(),
             'mould_id' => Mould::factory()->create(['cavity_count' => 4])->id,
             'cycle_time' => 10000,
-                'product_id' => Product::factory()->create()->id,
+            'product_id' => Product::factory()->create()->id,
             'production_protocol' => ['quality_checks' => [
                 ['checked_at' => now()->subMinutes(5)->toIso8601String(), 'quality_status' => 'quality_issue'],
             ]],
@@ -636,21 +680,95 @@ class RolePermissionsTest extends TestCase
             ->assertSee('Termelés leállítása');
     }
 
-    public function test_programmer_cannot_complete_an_order(): void
+    public function test_programmer_receives_a_message_if_order_request_is_stale(): void
     {
         $programmer = User::factory()->create(['role' => Role::Programmer]);
-        $order = Order::factory()->create(['status' => 'in_progress']);
+        $order = $this->makeOrder(['status' => 'in_progress']);
+
+        $request = Livewire::actingAs($programmer)
+            ->test('production-dashboard')
+            ->call('openOrderModal', $order->id);
+
+        $order->update(['requested_status' => 'interrupted']);
+
+        $request->call('requestOrderClosure', 'completed')
+            ->assertSet('showOrderModal', false)
+            ->assertSet('orderRequestedStatus', 'interrupted')
+            ->assertSee('Ehhez a megrendelőhöz már tartozik befejezési vagy megszakítási kérés.');
+
+        $this->assertSame('interrupted', $order->fresh()->requested_status);
+        $this->assertDatabaseCount('notifications', 0);
+    }
+
+    public function test_programmer_requests_completion_and_operator_completes_with_piece_counts(): void
+    {
+        $programmer = User::factory()->create(['role' => Role::Programmer]);
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $order = $this->makeOrder(['status' => 'in_progress']);
 
         Livewire::actingAs($programmer)
             ->test('production-dashboard')
             ->call('openOrderModal', $order->id)
-            ->set('orderStatus', 'completed')
-            ->set('goodQuantity', 10)
-            ->set('badQuantity', 0)
-            ->call('saveOrder')
-            ->assertHasErrors('orderStatus');
+            ->call('requestOrderClosure', 'completed');
 
         $this->assertSame('in_progress', $order->fresh()->status);
+        $this->assertSame('completed', $order->fresh()->requested_status);
+        $this->assertSame('completion_requested', $coordinator->unreadNotifications()->firstOrFail()->data['event']);
+        $this->assertSame('completion_requested', $operator->unreadNotifications()->firstOrFail()->data['event']);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openOrderModal', $order->id)
+            ->set('goodQuantity', 9)
+            ->set('badQuantity', 1)
+            ->call('saveOrder');
+
+        $this->assertSame('completed', $order->fresh()->status);
+        $this->assertNull($order->fresh()->requested_status);
+        $this->assertSame(9, $order->fresh()->good_quantity);
+        $this->assertSame(1, $order->fresh()->bad_quantity);
+        $this->assertNotNull($order->fresh()->ended_at);
+    }
+
+    public function test_coordinator_can_finish_normally_without_a_programmer_request(): void
+    {
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $order = $this->makeOrder(['status' => 'in_progress']);
+
+        Livewire::actingAs($coordinator)
+            ->test('production-dashboard')
+            ->call('openOrderModal', $order->id)
+            ->set('goodQuantity', 10)
+            ->set('badQuantity', 0)
+            ->call('saveOrder');
+
+        $this->assertSame('completed', $order->fresh()->status);
+        $this->assertSame(10, $order->fresh()->good_quantity);
+        $this->assertSame(0, $order->fresh()->bad_quantity);
+        $this->assertNotNull($order->fresh()->ended_at);
+    }
+
+    public function test_orders_dashboard_groups_all_orders_by_status_and_shows_pending_actions(): void
+    {
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $waiting = $this->makeOrder(['order_number' => 'ORD-WAIT', 'status' => 'waiting']);
+        $active = $this->makeOrder(['order_number' => 'ORD-ACTIVE', 'status' => 'in_progress', 'requested_status' => 'completed']);
+        $interrupted = $this->makeOrder(['order_number' => 'ORD-INTERRUPTED', 'status' => 'interrupted']);
+        $completed = $this->makeOrder(['order_number' => 'ORD-COMPLETED', 'status' => 'completed']);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('selectTab', 'orders')
+            ->assertSee('Várakozó megrendelők')
+            ->assertSee($waiting->order_number)
+            ->assertSee('Aktív megrendelők')
+            ->assertSee($active->order_number)
+            ->assertSee('Befejezésre vár')
+            ->assertSee('Megszakított megrendelők')
+            ->assertSee($interrupted->order_number)
+            ->assertSee('Befejezett / lejárt megrendelők')
+            ->assertSee($completed->order_number);
     }
 
     public function test_only_admin_can_access_the_filament_admin_panel(): void
@@ -660,5 +778,30 @@ class RolePermissionsTest extends TestCase
         $this->actingAs($coordinator)
             ->get('/admin')
             ->assertForbidden();
+    }
+
+    private function makeOrder(array $attributes): Order
+    {
+        $machine = new Machine;
+        $machine->forceFill([
+            'name' => 'Test machine',
+            'type' => 'Test',
+            'status' => 'active',
+        ]);
+        $machine->save();
+
+        $mould = new Mould;
+        $mould->forceFill(['name' => 'Test mould', 'number' => 'TEST', 'cavity_count' => 1, 'status' => 'active']);
+        $mould->save();
+
+        $product = new Product;
+        $product->forceFill(['name' => 'Test product', 'code' => 'TEST-'.fake()->unique()->uuid()]);
+        $product->save();
+
+        return Order::factory()->create(array_merge([
+            'machine_id' => $machine->id,
+            'mould_id' => $mould->id,
+            'product_id' => $product->id,
+        ], $attributes));
     }
 }

@@ -133,6 +133,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                             <?php ($order = $metrics->currentOrder()); ?>
                             <?php ($nextOrder = $metrics->nextActivatedOrder()); ?>
                             <?php ($state = $this->machineState($machine)); ?>
+                            <?php ($requestedStatus = $order?->requested_status); ?>
                             <tbody <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'machine-'.e($machine->id).''; ?>wire:key="machine-<?php echo e($machine->id); ?>">
                                 <tr class="<?php echo \Illuminate\Support\Arr::toCssClasses([
                                     'group cursor-pointer align-middle text-slate-800 transition-colors focus:outline-none [&>td:first-child]:border-l-4 [&>td]:transition-colors [&:hover>td]:border-teal-500 [&:hover>td]:bg-teal-100 [&:hover>td:first-child]:border-l-teal-600 [&:focus-visible>td]:border-teal-500 [&:focus-visible>td]:bg-teal-100',
@@ -141,6 +142,8 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                                     '[&>td]:bg-red-50 [&>td]:border-red-200 [&>td:first-child]:border-l-red-500' => $state === 'stopped',
                                     '[&>td]:bg-blue-50 [&>td]:border-blue-200 [&>td:first-child]:border-l-blue-500' => $state === 'setup',
                                     '[&>td:first-child]:border-l-slate-300' => $state === 'idle',
+                                    '[&>td]:bg-amber-100 [&>td]:border-amber-300 [&>td:first-child]:border-l-amber-600' => $requestedStatus === 'completed',
+                                    '[&>td]:bg-rose-100 [&>td]:border-rose-300 [&>td:first-child]:border-l-rose-600' => $requestedStatus === 'interrupted',
                                 ]); ?>" wire:click="toggleMachineRow(<?php echo e($machine->id); ?>)" wire:keydown.enter="toggleMachineRow(<?php echo e($machine->id); ?>)" role="button" tabindex="0" aria-expanded="<?php echo e($expandedMachineId === $machine->id ? 'true' : 'false'); ?>" title="<?php echo e($this->t('open_details')); ?>">
                                     <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($machine->name); ?></td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($machine->type); ?></td>
@@ -205,6 +208,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->machines->filter(fn ($machine) => $this->machineMatchesFilter($machine, $machineFilter)); $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $machine): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
                         <?php ($order = $machine->productionMetrics()->currentOrder()); ?>
                         <?php ($state = $this->machineState($machine)); ?>
+                        <?php ($requestedStatus = $order?->requested_status); ?>
                         <article <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'machine-card-'.e($machine->id).''; ?>wire:key="machine-card-<?php echo e($machine->id); ?>" wire:click="openMachineDetail(<?php echo e($machine->id); ?>)" wire:keydown.enter="openMachineDetail(<?php echo e($machine->id); ?>)" role="button" tabindex="0" title="<?php echo e($this->t('open_details')); ?>" class="<?php echo \Illuminate\Support\Arr::toCssClasses([
                             'cursor-pointer overflow-hidden rounded-xl border shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600',
                             'border-emerald-300 bg-emerald-50' => $state === 'running',
@@ -212,6 +216,8 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                             'border-red-300 bg-red-50' => $state === 'stopped',
                             'border-blue-300 bg-blue-50' => $state === 'setup',
                             'border-slate-200 bg-white' => $state === 'idle',
+                            'border-amber-400 bg-amber-100' => $requestedStatus === 'completed',
+                            'border-rose-400 bg-rose-100' => $requestedStatus === 'interrupted',
                         ]); ?>">
                             <div class="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
                                 <div>
@@ -366,30 +372,42 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
         <?php elseif($activeTab === 'orders'): ?>
             <section>
                 <h1 class="mb-5 text-2xl font-bold text-slate-900"><?php echo e($this->t('orders')); ?></h1>
-                <div class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <h2 class="text-lg font-bold"><?php echo e($this->t('all_orders')); ?></h2>
-                    <div class="mt-4 grid gap-3 md:grid-cols-2">
-                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->ordersForViewing; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $order): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
-                            <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'order-'.e($order->id).''; ?>wire:key="order-<?php echo e($order->id); ?>" class="flex items-center justify-between gap-3 rounded-lg bg-slate-50 p-4">
-                                <div>
-                                    <p class="font-semibold"><?php echo e($order->order_number); ?></p>
-                                    <p class="text-sm text-slate-500"><?php echo e($order->machine?->name); ?> · <?php echo e($order->product?->name); ?></p>
-                                    <p class="text-sm text-slate-600"><?php echo e($this->t('status')); ?>: <?php echo e($this->statusLabel($order->status)); ?></p>
-                                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($order->assignedOperator): ?>
-                                        <p class="text-sm text-slate-600"><?php echo e($this->t('operator')); ?>: <?php echo e($order->assignedOperator->name); ?></p>
-                                    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = $this->ordersForViewingByStatus; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $group => $orders): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                    <div class="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div class="flex items-center justify-between gap-3">
+                            <h2 class="text-lg font-bold"><?php echo e($this->t('order_group_'.$group)); ?></h2>
+                            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700"><?php echo e($orders->count()); ?></span>
+                        </div>
+                        <div class="mt-4 grid gap-3 md:grid-cols-2">
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $orders; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $order): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                                <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'order-'.e($order->id).''; ?>wire:key="order-<?php echo e($order->id); ?>" class="flex items-start justify-between gap-3 rounded-lg bg-slate-50 p-4">
+                                    <div>
+                                        <p class="font-semibold"><?php echo e($order->order_number); ?></p>
+                                        <p class="text-sm text-slate-500"><?php echo e($order->machine?->name); ?> · <?php echo e($order->product?->name); ?></p>
+                                        <p class="text-sm text-slate-600"><?php echo e($this->t('status')); ?>: <?php echo e($this->statusLabel($order->status)); ?></p>
+                                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($order->requested_status): ?>
+                                            <p class="mt-1 text-sm font-semibold text-amber-800"><?php echo e($this->t($order->requested_status === 'completed' ? 'completion_requested' : 'interruption_requested')); ?></p>
+                                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($order->assignedOperator): ?>
+                                            <p class="text-sm text-slate-600"><?php echo e($this->t('operator')); ?>: <?php echo e($order->assignedOperator->name); ?></p>
+                                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                                    </div>
+                                    <div class="flex shrink-0 flex-col gap-2">
+                                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canDo(\App\Enums\Role::ACTIVATE_ORDER) && in_array($order->status, ['waiting', 'paused', 'interrupted'], true)): ?>
+                                            <button wire:click="activateOrder(<?php echo e($order->id); ?>)" class="rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800"><?php echo e($this->t($order->status === 'paused' ? 'resume' : 'activate')); ?></button>
+                                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($group === 'active' && $this->canManageOrders()): ?>
+                                            <button wire:click="openOrderModal(<?php echo e($order->id); ?>)" class="rounded-md bg-amber-700 px-3 py-2 text-sm font-bold text-white hover:bg-amber-800"><?php echo e($this->t($order->requested_status ? 'execute_order_action' : 'manage')); ?></button>
+                                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                                        <button wire:click="openProductionProtocol(<?php echo e($order->id); ?>)" class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100"><?php echo e($this->t('production_protocol')); ?></button>
+                                    </div>
                                 </div>
-                                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canDo(\App\Enums\Role::ACTIVATE_ORDER) && in_array($order->status, ['waiting', 'paused'], true)): ?>
-                                    <button wire:click="activateOrder(<?php echo e($order->id); ?>)" class="rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800"><?php echo e($this->t($order->status === 'paused' ? 'resume' : 'activate')); ?></button>
-                                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
-                                <button wire:click="openProductionProtocol(<?php echo e($order->id); ?>)" class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100"><?php echo e($this->t('production_protocol')); ?></button>
-                            </div>
-                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
-                            <p class="text-sm text-slate-500 md:col-span-2"><?php echo e($this->t('no_waiting_orders')); ?></p>
-                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                                <p class="text-sm text-slate-500 md:col-span-2"><?php echo e($this->t('no_orders_in_group')); ?></p>
+                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                        </div>
                     </div>
-                </div>
-
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
             </section>
         <?php elseif($activeTab === 'moulds'): ?>
             <section>
@@ -493,7 +511,56 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
 
     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($showOrderModal): ?>
-        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6"><h2 class="text-xl font-bold"><?php echo e($this->t('manage_order')); ?></h2><div class="mt-5 grid gap-4"><label class="text-sm font-semibold"><?php echo e($this->t('status')); ?><select wire:model.live="orderStatus" class="mt-1 w-full rounded-md border-slate-300"><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if(! $this->isAdmin()): ?><option value=""><?php echo e($this->t('select_status')); ?></option><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?> <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->isAdmin()): ?><option value="in_progress"><?php echo e($this->t('in_progress')); ?></option><option value="paused"><?php echo e($this->t('paused')); ?></option><option value="completed"><?php echo e($this->t('completed')); ?></option><option value="interrupted"><?php echo e($this->t('interrupted')); ?></option><?php else: ?><option value="paused"><?php echo e($this->t('paused')); ?></option><option value="interrupted"><?php echo e($this->t('interrupted')); ?></option><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></select></label><label class="text-sm font-semibold"><?php echo e($this->t('current_quantity')); ?><input wire:model="currentQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if(in_array($orderStatus, ['completed', 'interrupted'], true)): ?><label class="text-sm font-semibold"><?php echo e($this->t('good_quantity')); ?><input wire:model="goodQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><label class="text-sm font-semibold"><?php echo e($this->t('bad_quantity')); ?><input wire:model="badQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></div><div class="mt-6 flex justify-end gap-3"><button wire:click="$set('showOrderModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600"><?php echo e($this->t('cancel')); ?></button><button wire:click="saveOrder" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white"><?php echo e($this->t('save')); ?></button></div></div></div>
+        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
+            <div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
+                <h2 class="text-xl font-bold"><?php echo e($this->t('manage_order')); ?></h2>
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->isProgrammer()): ?>
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($orderRequestedStatus): ?>
+                        <p class="mt-5 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950" role="status">
+                            <?php echo e($this->t($orderRequestedStatus === 'completed' ? 'completion_requested' : 'interruption_requested')); ?>
+
+                        </p>
+                    <?php else: ?>
+                        <div class="mt-5 grid gap-3">
+                            <button wire:click="requestOrderClosure('completed')" class="rounded-md border border-teal-900 bg-teal-700 px-4 py-3 text-sm font-bold text-white shadow-md transition-colors hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-700 focus:ring-offset-2"><?php echo e($this->t('request_completion')); ?></button>
+                            <button wire:click="requestOrderClosure('interrupted')" class="rounded-md border border-rose-900 bg-rose-700 px-4 py-3 text-sm font-bold text-white shadow-md transition-colors hover:bg-rose-800 focus:outline-none focus:ring-2 focus:ring-rose-700 focus:ring-offset-2"><?php echo e($this->t('request_interruption')); ?></button>
+                        </div>
+                    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                <?php else: ?>
+                    <div class="mt-5 grid gap-4">
+                        <label class="text-sm font-semibold"><?php echo e($this->t('status')); ?>
+
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->isAdmin()): ?>
+                            <select wire:model.live="orderStatus" class="mt-1 w-full rounded-md border-slate-300">
+                                <option value="in_progress"><?php echo e($this->t('in_progress')); ?></option>
+                                <option value="paused"><?php echo e($this->t('paused')); ?></option>
+                                <option value="completed"><?php echo e($this->t('completed')); ?></option>
+                                <option value="interrupted"><?php echo e($this->t('interrupted')); ?></option>
+                            </select>
+                            <?php else: ?>
+                                <div class="mt-1 rounded-md border border-slate-300 bg-slate-50 px-3 py-2">
+                                    <?php echo e($this->t(match ($orderRequestedStatus) {
+                                        'completed' => 'execute_completion_request',
+                                        'interrupted' => 'execute_interruption_request',
+                                        default => 'complete_order_normally',
+                                    })); ?>
+
+                                </div>
+                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                        </label>
+                        <label class="text-sm font-semibold"><?php echo e($this->t('current_quantity')); ?><input wire:model="currentQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>
+                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if(in_array($orderStatus, ['completed', 'interrupted'], true)): ?>
+                            <label class="text-sm font-semibold"><?php echo e($this->t('good_quantity')); ?><input wire:model="goodQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>
+                            <label class="text-sm font-semibold"><?php echo e($this->t('bad_quantity')); ?><input wire:model="badQuantity" type="number" min="0" class="mt-1 w-full rounded-md border-slate-300"></label>
+                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                    </div>
+                    <div class="mt-6 flex justify-end gap-3">
+                        <button wire:click="$set('showOrderModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600"><?php echo e($this->t('cancel')); ?></button>
+                        <button wire:click="saveOrder" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white"><?php echo e($this->t('save')); ?></button>
+                    </div>
+                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+            </div>
+        </div>
     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
 
     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($showProtocolModal && ($protocolOrder = \App\Models\Order::query()->find($protocolOrderId))): ?>
