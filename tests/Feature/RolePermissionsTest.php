@@ -1025,7 +1025,7 @@ class RolePermissionsTest extends TestCase
         $this->assertNotNull($order->fresh()->ended_at);
     }
 
-    public function test_orders_dashboard_groups_all_orders_by_status_and_shows_pending_actions(): void
+    public function test_orders_dashboard_submenus_show_only_the_selected_order_status_group(): void
     {
         $operator = User::factory()->create(['role' => Role::Operator]);
         $waiting = $this->makeOrder(['order_number' => 'ORD-WAIT', 'status' => 'waiting']);
@@ -1036,15 +1036,28 @@ class RolePermissionsTest extends TestCase
         Livewire::actingAs($operator)
             ->test('production-dashboard')
             ->call('selectTab', 'orders')
-            ->assertSee('Várakozó megrendelők')
-            ->assertSee($waiting->order_number)
+            ->assertSeeHtml('wire:click="selectOrderGroup(\'active\')"')
+            ->assertSeeHtml('wire:click="selectOrderGroup(\'interrupted\')"')
+            ->assertSeeHtml('wire:click="selectOrderGroup(\'waiting\')"')
+            ->assertSeeHtml('wire:click="selectOrderGroup(\'completed\')"')
             ->assertSee('Aktív megrendelők')
             ->assertSee($active->order_number)
             ->assertSee('Befejezésre vár')
+            ->assertDontSee($waiting->order_number)
+            ->assertDontSee($interrupted->order_number)
+            ->assertDontSee($completed->order_number)
+            ->call('selectOrderGroup', 'interrupted')
             ->assertSee('Megszakított megrendelők')
             ->assertSee($interrupted->order_number)
+            ->assertDontSee($active->order_number)
+            ->call('selectOrderGroup', 'waiting')
+            ->assertSee('Várakozó megrendelők')
+            ->assertSee($waiting->order_number)
+            ->assertDontSee($interrupted->order_number)
+            ->call('selectOrderGroup', 'completed')
             ->assertSee('Befejezett / lejárt megrendelők')
-            ->assertSee($completed->order_number);
+            ->assertSee($completed->order_number)
+            ->assertDontSee($waiting->order_number);
     }
 
     public function test_only_admin_can_access_the_filament_admin_panel(): void
