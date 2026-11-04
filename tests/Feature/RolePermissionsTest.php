@@ -45,6 +45,50 @@ class RolePermissionsTest extends TestCase
         $this->assertDatabaseCount('notifications', 3);
     }
 
+    public function test_programmer_can_activate_next_order_while_machine_is_running(): void
+    {
+        $programmer = User::factory()->create(['role' => Role::Programmer]);
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $currentOrder = $this->makeOrder([
+            'status' => 'in_progress',
+            'activated_at' => now()->subHour(),
+            'task_started_at' => now()->subMinutes(30),
+        ]);
+        $nextMould = new Mould;
+        $nextMould->forceFill([
+            'name' => 'Standby test mould',
+            'number' => 'STANDBY-TEST',
+            'cavity_count' => 1,
+            'status' => 'standby',
+        ]);
+        $nextMould->save();
+        $nextOrder = $this->makeOrder([
+            'machine_id' => $currentOrder->machine_id,
+            'mould_id' => $nextMould->id,
+            'status' => 'waiting',
+            'production_protocol' => [
+                'quality_status' => 'quality_issue',
+                'quality_issues' => [
+                    ['id' => 'open-issue', 'status' => 'open'],
+                ],
+            ],
+        ]);
+
+        Livewire::actingAs($programmer)
+            ->test('production-dashboard')
+            ->call('activateOrder', $nextOrder->id);
+
+        $this->assertSame('in_progress', $nextOrder->fresh()->status);
+        $this->assertNotNull($nextOrder->fresh()->activated_at);
+        $this->assertSame('activated', $coordinator->unreadNotifications()->firstOrFail()->data['event']);
+        $this->assertSame('activated', $operator->unreadNotifications()->firstOrFail()->data['event']);
+
+        $metrics = Machine::query()->with('orders')->findOrFail($currentOrder->machine_id)->productionMetrics();
+        $this->assertSame($currentOrder->id, $metrics->currentOrder()?->id);
+        $this->assertSame($nextOrder->id, $metrics->nextActivatedOrder()?->id);
+    }
+
     public function test_order_modal_can_be_closed(): void
     {
         $programmer = User::factory()->create(['role' => Role::Programmer]);

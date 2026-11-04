@@ -44,8 +44,8 @@ class OrdersTable
                     ->date()
                     ->sortable(),
                 TextColumn::make('cycle_time')
-                    ->label('Cycle (ms)')
-                    ->numeric()
+                    ->label('Cycle (s)')
+                    ->formatStateUsing(fn (?int $state): ?string => $state === null ? null : number_format($state / 1000, 3))
                     ->sortable(),
                 TextColumn::make('net_weight')
                     ->label('Net Weight (g)')

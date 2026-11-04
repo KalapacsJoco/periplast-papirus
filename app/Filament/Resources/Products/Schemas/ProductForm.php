@@ -55,6 +55,7 @@ class ProductForm
                     ->columns(2)
                     ->defaultItems(0),
                 Select::make('moulds')
+                    ->label('Kompatibilis szerszámok')
                     ->relationship('moulds', 'name')
                     ->multiple()
                     ->searchable()

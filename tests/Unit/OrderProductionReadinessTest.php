@@ -44,6 +44,25 @@ class OrderProductionReadinessTest extends TestCase
         $this->assertFalse($order->canRunProduction());
     }
 
+    public function test_order_can_be_activated_with_a_stopped_machine_and_non_ready_mould_or_quality(): void
+    {
+        $order = $this->order('stopped', 'standby', [
+            'quality_status' => 'quality_issue',
+            'quality_issues' => [
+                ['id' => 'issue-1', 'status' => 'open'],
+            ],
+        ]);
+
+        $this->assertTrue($order->canBeActivated());
+    }
+
+    public function test_order_cannot_be_activated_when_machine_is_broken(): void
+    {
+        $order = $this->order('broken', 'active');
+
+        $this->assertFalse($order->canBeActivated());
+    }
+
     public static function readyEquipmentStatuses(): array
     {
         return [

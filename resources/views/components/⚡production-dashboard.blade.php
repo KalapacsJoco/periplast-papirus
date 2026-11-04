@@ -644,7 +644,7 @@ new class extends Component
         $this->ensurePermission(Role::ACTIVATE_ORDER);
         $order = Order::findOrFail($orderId);
         abort_unless(in_array($order->status, ['waiting', 'paused', 'interrupted'], true), 422);
-        abort_unless($order->canRunProduction(), 422, $this->t('production_blocked_by_issue'));
+        abort_unless($order->canBeActivated(), 422, $this->t('order_activation_blocked_broken_machine'));
         $isReactivation = $order->status === 'interrupted';
         $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
         $protocol['automatic_pause'] = null;

@@ -17,16 +17,14 @@ class MouldForm
         return $schema
             ->components([
                 Select::make('products')
+                    ->label('Kompatibilis termékek')
                     ->relationship('products', 'name')
                     ->multiple()
                     ->searchable()
                     ->preload()
-                    ->required(),
+                    ->helperText('A szerszám termék nélkül is létrehozható; a termékhez később is hozzárendelhető.'),
                 TextInput::make('name')
                     ->required(),
-                TextInput::make('type')
-                    ->required()
-                    ->default('standard'),
                 TextInput::make('number')
                     ->required(),
                 TextInput::make('cavity_count')

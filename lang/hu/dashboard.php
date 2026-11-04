@@ -196,6 +196,7 @@ return [
     'order_no_longer_active' => 'A megrendelő közben már nem aktív, ezért a kérés nem küldhető el.',
     'order_activated' => 'A megrendelő aktívvá vált.',
     'production_blocked_by_issue' => 'A megrendelő nem indítható, amíg a gép, a szerszám és a minőség nincs aktív vagy figyelmeztető állapotban.',
+    'order_activation_blocked_broken_machine' => 'A megrendelő csak akkor aktiválható, ha a hozzárendelt gép nem hibás.',
     'quality_check_saved' => 'A minőségellenőrzés rögzítve lett.',
     'resolve_quality_issue_first' => 'Először a termelési protokollban oldd fel a nyitott minőségi hibát.',
     'quality_issue_stopped' => 'Minőségi hiba rögzítve, a gyártás automatikusan leállítva.',

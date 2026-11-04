@@ -196,6 +196,7 @@ return [
     'order_no_longer_active' => 'Der Auftrag ist inzwischen nicht mehr aktiv; die Anforderung wurde nicht gesendet.',
     'order_activated' => 'Der Auftrag wurde aktiviert.',
     'production_blocked_by_issue' => 'Der Auftrag kann erst starten, wenn Maschine, Werkzeug und Qualität aktiv oder im Warnstatus sind.',
+    'order_activation_blocked_broken_machine' => 'Der Auftrag kann nur aktiviert werden, wenn die zugewiesene Maschine nicht defekt ist.',
     'quality_check_saved' => 'Die Qualitätskontrolle wurde erfasst.',
     'resolve_quality_issue_first' => 'Beheben Sie zuerst den offenen Qualitätsfehler im Produktionsprotokoll.',
     'quality_issue_stopped' => 'Qualitätsfehler erfasst, die Produktion wurde automatisch angehalten.',

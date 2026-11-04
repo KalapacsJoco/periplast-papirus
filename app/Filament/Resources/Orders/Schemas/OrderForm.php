@@ -77,11 +77,14 @@ class OrderForm
                     ->minValue(1)
                     ->required(),
                 TextInput::make('cycle_time')
-                    ->label('Cycle Time (ms)')
+                    ->label('Cycle Time (s)')
                     ->numeric()
                     ->minValue(0)
+                    ->step('0.001')
+                    ->formatStateUsing(fn (?int $state): ?float => $state === null ? null : $state / 1000)
+                    ->dehydrateStateUsing(fn ($state): ?int => filled($state) ? (int) round((float) $state * 1000) : null)
                     ->required()
-                    ->helperText('Cycle time in milliseconds'),
+                    ->helperText('Cycle time in seconds'),
                 TextInput::make('net_weight')
                     ->numeric()
                     ->step('0.001')

@@ -190,6 +190,12 @@ class Order extends Model
             && in_array($this->mould?->status, ['active', 'warning'], true);
     }
 
+    public function canBeActivated(): bool
+    {
+        return $this->machine !== null
+            && $this->machine->status !== 'broken';
+    }
+
     public function pauseForIssue(string $cause, string $reason): bool
     {
         $protocol = is_array($this->production_protocol) ? $this->production_protocol : [];
