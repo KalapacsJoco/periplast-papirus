@@ -224,7 +224,7 @@
                     }}:</strong> {{ $detailOrder->pause_description }}</p>
             @endif
             <div class="mt-4 flex flex-wrap gap-2">
-                @if ($this->canManageOrders())
+                @if ($this->canManageOrders() && $this->shouldShowManageOrder($detailOrder))
                 <button wire:click="openOrderModal({{ $detailOrder->id }})"
                     class="rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{
                     $this->t('manage_order') }}</button>

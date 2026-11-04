@@ -200,7 +200,7 @@
             <p class="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-800"><strong><?php echo e($this->t('pause_reason')); ?>:</strong> <?php echo e($detailOrder->pause_description); ?></p>
             <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
             <div class="mt-4 flex flex-wrap gap-2">
-                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canManageOrders()): ?>
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canManageOrders() && $this->shouldShowManageOrder($detailOrder)): ?>
                 <button wire:click="openOrderModal(<?php echo e($detailOrder->id); ?>)"
                     class="rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800"><?php echo e($this->t('manage_order')); ?></button>
                 <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>

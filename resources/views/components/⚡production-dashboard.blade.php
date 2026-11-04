@@ -485,11 +485,12 @@ new class extends Component
         abort_unless(in_array($order->status, ['in_progress', 'paused'], true), 422);
         if ($this->canExecuteOrderClosure()) {
             abort_unless($order->requested_status === null || in_array($order->requested_status, ['completed', 'interrupted'], true), 422);
+            abort_unless($this->shouldShowManageOrder($order), 422);
         }
         $this->orderId = $order->id;
         $this->orderRequestedStatus = $order->requested_status;
         $this->orderStatus = match (true) {
-            $this->isAdmin() => $order->status,
+            $this->isAdmin() => $order->requested_status ?? $order->status,
             $this->canExecuteOrderClosure() => $order->requested_status ?? 'completed',
             default => '',
         };
@@ -507,7 +508,7 @@ new class extends Component
 
     public function requestOrderClosure(string $requestedStatus): void
     {
-        abort_unless($this->isProgrammer(), 403);
+        abort_unless($this->isProgrammer() || $this->isAdmin(), 403);
         $this->ensurePermission(Role::INTERRUPT_ORDER);
         abort_unless(in_array($requestedStatus, ['completed', 'interrupted'], true), 422);
 
@@ -570,6 +571,7 @@ new class extends Component
         abort_unless($this->isAdmin() || $isExecutor, 403);
         if ($isExecutor) {
             abort_unless($order->requested_status === null || in_array($order->requested_status, ['completed', 'interrupted'], true), 422);
+            abort_unless($order->requested_status !== null || $this->shouldShowManageOrder($order), 422);
         }
 
         $allowedStatuses = match (true) {
@@ -1070,7 +1072,7 @@ new class extends Component
 
     public function expectedQuantity(Order $order): ?int
     {
-        $cycleMs = $order->cycle_time;
+        $cycleMs = $order->measured_cycle_time;
         $cavities = $order->mould?->cavity_count;
         $startedAt = $this->productionStartedAt($order);
 
@@ -1079,9 +1081,52 @@ new class extends Component
         }
 
         $end = $order->ended_at ?? ($order->status === 'paused' ? $order->last_paused_at : null) ?? now();
-        $elapsedMs = max(0, $startedAt->diffInMilliseconds($end, false));
+        $latestCounterEntry = collect(data_get($order->production_protocol, 'entries', []))
+            ->filter(fn ($entry): bool => is_array($entry)
+                && is_string($entry['timestamp'] ?? null)
+                && isset($entry['current_quantity']))
+            ->map(fn (array $entry): array => [
+                'timestamp' => Carbon::parse($entry['timestamp']),
+                'quantity' => max(0, (int) $entry['current_quantity']),
+            ])
+            ->filter(fn (array $entry): bool => $entry['timestamp']->greaterThanOrEqualTo($startedAt))
+            ->sortBy(fn (array $entry): int => $entry['timestamp']->getTimestamp())
+            ->last();
+        $baselineAt = $latestCounterEntry['timestamp'] ?? $startedAt;
+        $baselineQuantity = $latestCounterEntry['quantity'] ?? 0;
+        $elapsedMs = max(0, $baselineAt->diffInMilliseconds($end, false));
 
-        return (int) min($order->quantity, floor($elapsedMs / $cycleMs) * $cavities);
+        return (int) min($order->quantity, $baselineQuantity + floor($elapsedMs / $cycleMs) * $cavities);
+    }
+
+    public function remainingProductionMilliseconds(Order $order): ?int
+    {
+        $measuredCycleTime = $order->measured_cycle_time;
+        $cavities = $order->mould?->cavity_count;
+
+        if ($order->status !== 'in_progress' || ! $measuredCycleTime || ! $cavities || $order->quantity <= 0) {
+            return null;
+        }
+
+        $remainingQuantity = max(0, $order->quantity - $order->current_quantity);
+        $remainingCycles = (int) ceil($remainingQuantity / $cavities);
+
+        return $remainingCycles * $measuredCycleTime;
+    }
+
+    public function shouldShowManageOrder(Order $order): bool
+    {
+        if ($this->isAdmin() || $this->isProgrammer()) {
+            return true;
+        }
+
+        if ($order->requested_status !== null) {
+            return true;
+        }
+
+        $remainingMilliseconds = $this->remainingProductionMilliseconds($order);
+
+        return $remainingMilliseconds !== null && $remainingMilliseconds <= 30 * 60 * 1000;
     }
 
     public function expectedProgress(Order $order): ?int
@@ -1347,7 +1392,7 @@ new class extends Component
         @endif
 
         @if ($activeTab === 'machines')
-            <section wire:poll.60s>
+            <section wire:poll.15s>
                 <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('machines') }}</h1>
                     <select wire:model.live="machineFilter" aria-label="{{ $this->t('machine_status_label') }}" class="rounded-md border-slate-300 bg-white px-3 py-2 text-sm">
@@ -1481,7 +1526,7 @@ new class extends Component
                                                 <p class="font-bold text-teal-950">{{ $this->t('current_order') }}</p>
                                                 <p class="text-sm text-teal-800">{{ $order->order_number }} · {{ $order->product?->name ?? $this->t('no_products') }}</p>
                                             </div>
-                                            @if ($this->canManageOrders())
+                                            @if ($this->canManageOrders() && $this->shouldShowManageOrder($order))
                                                 <button wire:click.stop="openOrderModal({{ $order->id }})" class="rounded-md bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800">{{ $this->t('manage') }}</button>
                                             @endif
                                         </div>
@@ -1633,7 +1678,7 @@ new class extends Component
                                         @if ($this->canDo(\App\Enums\Role::ACTIVATE_ORDER) && in_array($order->status, ['waiting', 'paused', 'interrupted'], true))
                                             <button wire:click="activateOrder({{ $order->id }})" class="rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t($order->status === 'paused' ? 'resume' : 'activate') }}</button>
                                         @endif
-                                        @if ($group === 'active' && $this->canManageOrders())
+                                        @if ($group === 'active' && $this->canManageOrders() && $this->shouldShowManageOrder($order))
                                             <button wire:click="openOrderModal({{ $order->id }})" class="rounded-md bg-amber-700 px-3 py-2 text-sm font-bold text-white hover:bg-amber-800">{{ $this->t($order->requested_status ? 'execute_order_action' : 'manage') }}</button>
                                         @endif
                                         <button wire:click="openProductionProtocol({{ $order->id }})" class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">{{ $this->t('production_protocol') }}</button>
@@ -1763,6 +1808,16 @@ new class extends Component
                         </div>
                     @endif
                 @else
+                    @if ($this->isAdmin() && ! $orderRequestedStatus)
+                        <div class="mt-5 grid gap-3">
+                            <button wire:click="requestOrderClosure('completed')" class="rounded-md border border-teal-900 bg-teal-700 px-4 py-3 text-sm font-bold text-white shadow-md transition-colors hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-700 focus:ring-offset-2">{{ $this->t('request_completion') }}</button>
+                            <button wire:click="requestOrderClosure('interrupted')" class="rounded-md border border-rose-900 bg-rose-700 px-4 py-3 text-sm font-bold text-white shadow-md transition-colors hover:bg-rose-800 focus:outline-none focus:ring-2 focus:ring-rose-700 focus:ring-offset-2">{{ $this->t('request_interruption') }}</button>
+                        </div>
+                    @elseif ($orderRequestedStatus)
+                        <p class="mt-5 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950" role="status">
+                            {{ $this->t($orderRequestedStatus === 'completed' ? 'completion_requested' : 'interruption_requested') }}
+                        </p>
+                    @endif
                     <div class="mt-5 grid gap-4">
                         <label class="text-sm font-semibold">{{ $this->t('status') }}
                             @if ($this->isAdmin())

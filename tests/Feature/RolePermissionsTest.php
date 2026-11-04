@@ -285,19 +285,17 @@ class RolePermissionsTest extends TestCase
 
         try {
             $operator = User::factory()->create(['role' => Role::Operator]);
-            $order = Order::factory()->create([
+            $order = $this->makeOrder([
                 'status' => 'in_progress',
                 'quantity' => 1000,
                 'current_quantity' => 30,
                 'started_at' => now()->subHours(2),
+                'measured_cycle_time' => 10000,
                 'production_protocol' => ['quality_checks' => [
-                    ['checked_at' => now()->subSeconds(500)->toIso8601String(), 'quality_status' => 'warning'],
                     ['checked_at' => now()->subSeconds(100)->toIso8601String(), 'quality_status' => 'good'],
-                    ['checked_at' => now()->subSeconds(50)->toIso8601String(), 'quality_status' => 'good'],
                 ]],
-                'mould_id' => Mould::factory()->create(['cavity_count' => 4])->id,
+                'mould_id' => $this->makeMouldWithCavities(4)->id,
                 'cycle_time' => 10000,
-                'product_id' => Product::factory()->create()->id,
             ]);
 
             $this->assertSame(40, Livewire::actingAs($operator)->test('production-dashboard')->instance()->expectedQuantity($order->load(['mould', 'product'])));
@@ -315,13 +313,12 @@ class RolePermissionsTest extends TestCase
     public function test_expected_quantity_is_not_shown_before_first_good_quality_check(): void
     {
         $operator = User::factory()->create(['role' => Role::Operator]);
-        $order = Order::factory()->create([
+        $order = $this->makeOrder([
             'status' => 'in_progress',
             'quantity' => 1000,
             'started_at' => now()->subHour(),
-            'mould_id' => Mould::factory()->create(['cavity_count' => 4])->id,
+            'mould_id' => $this->makeMouldWithCavities(4)->id,
             'cycle_time' => 10000,
-            'product_id' => Product::factory()->create()->id,
             'production_protocol' => ['quality_checks' => [
                 ['checked_at' => now()->subMinutes(5)->toIso8601String(), 'quality_status' => 'quality_issue'],
             ]],
@@ -420,13 +417,13 @@ class RolePermissionsTest extends TestCase
 
         try {
             $qualityManager = User::factory()->create(['role' => Role::QualityManager]);
-            $order = Order::factory()->create([
+            $order = $this->makeOrder([
                 'status' => 'in_progress',
                 'quantity' => 1000,
                 'current_quantity' => 30,
-                'mould_id' => Mould::factory()->create(['cavity_count' => 4])->id,
+                'mould_id' => $this->makeMouldWithCavities(4)->id,
                 'cycle_time' => 10000,
-                'product_id' => Product::factory()->create()->id,
+                'measured_cycle_time' => 10000,
                 'production_protocol' => ['quality_checks' => [
                     ['checked_at' => now()->subSeconds(100)->toIso8601String(), 'quality_status' => 'good'],
                 ]],
@@ -448,24 +445,189 @@ class RolePermissionsTest extends TestCase
             Livewire::actingAs($qualityManager)
                 ->test('production-dashboard')
                 ->call('openQualityModal', $order->id)
-                ->set('currentQuantity', 41)
+                ->set('currentQuantity', 21)
                 ->call('saveQualityCheck')
                 ->assertSet('showQualityModal', true)
-                ->assertSee('nagyobb, mint az elméleti darabszám (40 db)');
+                ->assertSee('nagyobb, mint az elméleti darabszám (20 db)');
 
             $this->assertSame(20, $order->fresh()->current_quantity);
 
             Livewire::actingAs($qualityManager)
                 ->test('production-dashboard')
                 ->call('openQualityModal', $order->id)
-                ->set('currentQuantity', 40)
+                ->set('currentQuantity', 20)
                 ->call('saveQualityCheck')
                 ->assertSet('showQualityModal', false);
 
-            $this->assertSame(40, $order->fresh()->current_quantity);
+            $this->assertSame(20, $order->fresh()->current_quantity);
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_expected_quantity_and_completion_window_use_measured_cycle_and_current_counter(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-10-18 12:00:00'));
+
+        try {
+            $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+            $order = $this->makeOrder([
+                'status' => 'in_progress',
+                'quantity' => 1000,
+                'current_quantity' => 800,
+                'cycle_time' => 10000,
+                'measured_cycle_time' => 20000,
+                'mould_id' => $this->makeMouldWithCavities(2)->id,
+                'production_protocol' => [
+                    'quality_checks' => [
+                        ['checked_at' => now()->subHour()->toIso8601String(), 'quality_status' => 'good'],
+                    ],
+                    'entries' => [
+                        ['timestamp' => now()->subMinutes(10)->toIso8601String(), 'current_quantity' => 800],
+                    ],
+                ],
+            ]);
+
+            $component = Livewire::actingAs($coordinator)->test('production-dashboard');
+            $loadedOrder = $order->fresh()->load('mould');
+
+            $this->assertSame(860, $component->instance()->expectedQuantity($loadedOrder));
+            $this->assertSame(2_000_000, $component->instance()->remainingProductionMilliseconds($loadedOrder));
+            $this->assertFalse($component->instance()->shouldShowManageOrder($loadedOrder));
+
+            $component->call('openMachineDetail', $order->machine_id)
+                ->assertDontSeeHtml('wire:click="openOrderModal('.$order->id.')"');
+
+            $order->update(['current_quantity' => 820]);
+            $loadedOrder = $order->fresh()->load('mould');
+
+            $this->assertSame(1_800_000, $component->instance()->remainingProductionMilliseconds($loadedOrder));
+            $this->assertTrue($component->instance()->shouldShowManageOrder($loadedOrder));
+            $component->call('openMachineDetail', $order->machine_id)
+                ->assertSeeHtml('wire:click="openOrderModal('.$order->id.')"');
+
+            $order->appendProtocolEntry(820, 'quality_check');
+            $this->assertSame(820, $component->instance()->expectedQuantity($order->fresh()->load('mould')));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_programmer_and_admin_always_see_the_manage_order_button(): void
+    {
+        $order = $this->makeOrder([
+            'status' => 'in_progress',
+            'quantity' => 1000,
+            'current_quantity' => 0,
+            'measured_cycle_time' => 20000,
+            'mould_id' => $this->makeMouldWithCavities(2)->id,
+        ]);
+
+        foreach ([Role::Programmer, Role::Admin] as $role) {
+            $user = User::factory()->create(['role' => $role]);
+            $component = Livewire::actingAs($user)->test('production-dashboard');
+
+            $this->assertTrue($component->instance()->shouldShowManageOrder($order->fresh()->load('mould')));
+            $component->call('openMachineDetail', $order->machine_id)
+                ->assertSeeHtml('wire:click="openOrderModal('.$order->id.')"');
+        }
+    }
+
+    public function test_other_users_cannot_open_an_order_before_the_completion_window(): void
+    {
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $order = $this->makeOrder([
+            'status' => 'in_progress',
+            'quantity' => 1000,
+            'current_quantity' => 0,
+            'measured_cycle_time' => 20000,
+            'mould_id' => $this->makeMouldWithCavities(2)->id,
+        ]);
+
+        $component = Livewire::actingAs($coordinator)->test('production-dashboard');
+        $this->assertFalse($component->instance()->shouldShowManageOrder($order->fresh()->load('mould')));
+        $component->call('openMachineDetail', $order->machine_id)
+            ->assertDontSeeHtml('wire:click="openOrderModal('.$order->id.')"');
+
+        $component->call('openOrderModal', $order->id)
+            ->assertStatus(422);
+
+        Livewire::actingAs($coordinator)
+            ->test('production-dashboard')
+            ->set('orderId', $order->id)
+            ->set('orderStatus', 'completed')
+            ->set('currentQuantity', 1000)
+            ->set('goodQuantity', 1000)
+            ->set('badQuantity', 0)
+            ->call('saveOrder')
+            ->assertStatus(422);
+    }
+
+    public function test_admin_can_request_early_completion_for_an_operator_to_execute(): void
+    {
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $order = $this->makeOrder([
+            'status' => 'in_progress',
+            'quantity' => 1000,
+            'current_quantity' => 0,
+            'measured_cycle_time' => 20000,
+            'mould_id' => $this->makeMouldWithCavities(2)->id,
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test('production-dashboard')
+            ->call('openOrderModal', $order->id)
+            ->assertSee('Megrendelő befejezése')
+            ->assertSee('Megrendelő megszakítása')
+            ->call('requestOrderClosure', 'completed')
+            ->assertSet('showOrderModal', false);
+
+        $this->assertSame('completed', $order->fresh()->requested_status);
+
+        Livewire::actingAs($operator)
+            ->test('production-dashboard')
+            ->call('openMachineDetail', $order->machine_id)
+            ->assertSeeHtml('wire:click="openOrderModal('.$order->id.')"')
+            ->call('openOrderModal', $order->id)
+            ->set('goodQuantity', 9)
+            ->set('badQuantity', 1)
+            ->call('saveOrder');
+
+        $this->assertSame('completed', $order->fresh()->status);
+        $this->assertNull($order->fresh()->requested_status);
+    }
+
+    public function test_manage_order_is_shown_when_a_closure_request_exists_outside_the_completion_window(): void
+    {
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $order = $this->makeOrder([
+            'status' => 'in_progress',
+            'quantity' => 1000,
+            'current_quantity' => 0,
+            'measured_cycle_time' => 20000,
+            'requested_status' => 'completed',
+            'mould_id' => $this->makeMouldWithCavities(2)->id,
+        ]);
+
+        $component = Livewire::actingAs($coordinator)->test('production-dashboard');
+        $this->assertTrue($component->instance()->shouldShowManageOrder($order->load('mould')));
+        $component->call('openMachineDetail', $order->machine_id)
+            ->assertSeeHtml('wire:click="openOrderModal('.$order->id.')"');
+    }
+
+    private function makeMouldWithCavities(int $cavities): Mould
+    {
+        $mould = new Mould;
+        $mould->forceFill([
+            'name' => 'Test mould '.$cavities,
+            'number' => 'TEST-'.$cavities,
+            'cavity_count' => $cavities,
+            'status' => 'active',
+        ]);
+        $mould->save();
+
+        return $mould;
     }
 
     public function test_operator_task_list_hides_tasks_that_have_already_started(): void
@@ -793,7 +955,13 @@ class RolePermissionsTest extends TestCase
     public function test_coordinator_can_finish_normally_without_a_programmer_request(): void
     {
         $coordinator = User::factory()->create(['role' => Role::Coordinator]);
-        $order = $this->makeOrder(['status' => 'in_progress']);
+        $order = $this->makeOrder([
+            'status' => 'in_progress',
+            'quantity' => 10,
+            'current_quantity' => 9,
+            'measured_cycle_time' => 20000,
+            'mould_id' => $this->makeMouldWithCavities(2)->id,
+        ]);
 
         Livewire::actingAs($coordinator)
             ->test('production-dashboard')
