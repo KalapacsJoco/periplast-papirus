@@ -66,6 +66,7 @@ return [
     'screw_diameter' => 'Csigaátmérő',
     'problem' => 'Probléma',
     'current_order' => 'Jelenlegi megrendelő',
+    'last_order' => 'Utolsó megrendelő',
     'manage' => 'Kezelés',
     'current_quantity' => 'Aktuális mennyiség',
     'quality' => 'Minőség',

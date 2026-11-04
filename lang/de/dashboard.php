@@ -66,6 +66,7 @@ return [
     'screw_diameter' => 'Schneckendurchmesser',
     'problem' => 'Problem',
     'current_order' => 'Aktueller Auftrag',
+    'last_order' => 'Letzter Auftrag',
     'manage' => 'Verwalten',
     'current_quantity' => 'Aktuelle Menge',
     'quality' => 'Qualität',

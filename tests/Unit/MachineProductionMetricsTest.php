@@ -67,6 +67,22 @@ class MachineProductionMetricsTest extends TestCase
         $this->assertSame([$waiting], $metrics->waitingOrders()->all());
     }
 
+    public function test_it_finds_the_most_recent_completed_or_interrupted_order(): void
+    {
+        $completed = $this->order(10, status: 'completed');
+        $completed->id = 1;
+        $completed->ended_at = CarbonImmutable::now()->subDay();
+
+        $interrupted = $this->order(20, status: 'interrupted');
+        $interrupted->id = 2;
+        $interrupted->last_paused_at = CarbonImmutable::now()->subHour();
+
+        $metrics = new MachineProductionMetrics($this->machine([$completed, $interrupted]));
+
+        $this->assertSame($interrupted, $metrics->lastClosedOrder());
+        $this->assertNull($metrics->currentOrder());
+    }
+
     public function test_it_does_not_invent_daily_production_when_historical_counts_are_missing(): void
     {
         CarbonImmutable::setTestNow('2026-10-19 18:00:00');

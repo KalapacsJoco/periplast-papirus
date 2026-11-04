@@ -240,8 +240,16 @@ new class extends Component
         return $query
             ->where(function ($query): void {
                 $query
-                    ->whereIn('status', ['waiting', 'in_progress', 'paused', 'interrupted'])
-                    ->orWhere('ended_at', '>=', now()->subDay());
+                    ->whereIn('status', ['waiting', 'in_progress', 'paused'])
+                    ->orWhere('ended_at', '>=', now()->subDay())
+                    ->orWhereIn('orders.id', Order::query()
+                        ->select('latest_orders.id')
+                        ->from('orders as latest_orders')
+                        ->whereColumn('latest_orders.machine_id', 'orders.machine_id')
+                        ->whereIn('latest_orders.status', ['completed', 'interrupted'])
+                        ->orderByRaw('COALESCE(latest_orders.ended_at, latest_orders.last_paused_at, latest_orders.updated_at) DESC')
+                        ->orderByDesc('latest_orders.id')
+                        ->limit(1));
             })
             ->with($with)
             ->orderBy('date')
@@ -677,9 +685,6 @@ new class extends Component
             $this->notifyWorkflowRecipients($order->refresh(), 'activated');
         }
         $this->flashMessage = $this->t('order_activated');
-        if (! $order->hasMeasuredData() && $this->canEnterMeasuredData()) {
-            $this->openMeasuredModal($order->id);
-        }
         unset($this->machines, $this->waitingOrders, $this->ordersForViewing, $this->ordersForViewingByStatus);
     }
 
@@ -913,7 +918,7 @@ new class extends Component
         $order->appendProtocolEntry($order->current_quantity, 'task_started', $this->t('task_started_note'));
 
         $this->flashMessage = $this->t('task_started');
-        if (! $order->hasMeasuredData() && $this->canEnterMeasuredData()) {
+        if (Auth::user()->role === Role::Operator && ! $order->hasMeasuredData() && $this->canEnterMeasuredData()) {
             $this->openMeasuredModal($order->id);
         }
         unset($this->machines, $this->ordersForMyTasks, $this->ordersForAssignment);
@@ -1416,10 +1421,11 @@ new class extends Component
                         </thead>
                         @forelse ($this->machines->filter(fn ($machine) => $this->machineMatchesFilter($machine, $machineFilter)) as $machine)
                             @php($metrics = $machine->productionMetrics())
-                            @php($order = $metrics->currentOrder())
+                            @php($runningOrder = $metrics->currentOrder())
+                            @php($order = $runningOrder ?? $metrics->lastClosedOrder())
                             @php($nextOrder = $metrics->nextActivatedOrder())
                             @php($state = $this->machineState($machine))
-                            @php($requestedStatus = $order?->requested_status)
+                            @php($requestedStatus = $runningOrder?->requested_status)
                             <tbody wire:key="machine-{{ $machine->id }}">
                                 <tr @class([
                                     'group cursor-pointer align-middle text-slate-800 transition-colors focus:outline-none [&>td:first-child]:border-l-4 [&>td]:transition-colors [&:hover>td]:border-teal-500 [&:hover>td]:bg-teal-100 [&:hover>td:first-child]:border-l-teal-600 [&:focus-visible>td]:border-teal-500 [&:focus-visible>td]:bg-teal-100',
@@ -1433,7 +1439,7 @@ new class extends Component
                                 ]) wire:click="toggleMachineRow({{ $machine->id }})" wire:keydown.enter="toggleMachineRow({{ $machine->id }})" role="button" tabindex="0" aria-expanded="{{ $expandedMachineId === $machine->id ? 'true' : 'false' }}" title="{{ $this->t('open_details') }}">
                                     <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->name }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->type }}</td>
-                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order && $this->qualityCheckOverdue($order))<span class="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-black text-white" title="{{ $this->t('quality_check_overdue') }}" aria-label="{{ $this->t('quality_check_overdue') }}">!</span>@endif{{ $order?->product?->name ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($runningOrder && $this->qualityCheckOverdue($runningOrder))<span class="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-black text-white" title="{{ $this->t('quality_check_overdue') }}" aria-label="{{ $this->t('quality_check_overdue') }}">!</span>@endif{{ $order?->product?->name ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_gross_weight !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('gross_weight')]) title="{{ $this->t('theoretical') }}: {{ $order?->gross_weight ?? '-' }}">{{ $order->measured_gross_weight }}</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->gross_weight ?? '-' }}</span>@endif</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_net_weight !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('net_weight')]) title="{{ $this->t('theoretical') }}: {{ $order?->net_weight ?? '-' }}">{{ $order->measured_net_weight }}</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->net_weight ?? '-' }}</span>@endif</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->order_number ?? '-' }}</td>
@@ -1492,9 +1498,11 @@ new class extends Component
 
                 <div class="grid gap-4 sm:grid-cols-2 xl:hidden">
                     @forelse ($this->machines->filter(fn ($machine) => $this->machineMatchesFilter($machine, $machineFilter)) as $machine)
-                        @php($order = $machine->productionMetrics()->currentOrder())
+                        @php($metrics = $machine->productionMetrics())
+                        @php($runningOrder = $metrics->currentOrder())
+                        @php($order = $runningOrder ?? $metrics->lastClosedOrder())
                         @php($state = $this->machineState($machine))
-                        @php($requestedStatus = $order?->requested_status)
+                        @php($requestedStatus = $runningOrder?->requested_status)
                         <article wire:key="machine-card-{{ $machine->id }}" wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}" @class([
                             'cursor-pointer overflow-hidden rounded-xl border shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600',
                             'border-emerald-300 bg-emerald-50' => $state === 'running',
@@ -1523,13 +1531,16 @@ new class extends Component
                                     <div class="mt-5 rounded-lg border border-teal-100 bg-teal-50 p-4">
                                         <div class="flex items-start justify-between gap-3">
                                             <div>
-                                                <p class="font-bold text-teal-950">{{ $this->t('current_order') }}</p>
+                                                <p class="font-bold text-teal-950">{{ $this->t($runningOrder ? 'current_order' : 'last_order') }}</p>
                                                 <p class="text-sm text-teal-800">{{ $order->order_number }} · {{ $order->product?->name ?? $this->t('no_products') }}</p>
                                             </div>
-                                            @if ($this->canManageOrders() && $this->shouldShowManageOrder($order))
+                                            @if ($runningOrder && $this->canManageOrders() && $this->shouldShowManageOrder($runningOrder))
                                                 <button wire:click.stop="openOrderModal({{ $order->id }})" class="rounded-md bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800">{{ $this->t('manage') }}</button>
                                             @endif
                                         </div>
+                                        @if (! $runningOrder)
+                                            <p class="mt-2 text-xs font-semibold text-slate-600">{{ $this->t('status') }}: {{ $this->statusLabel($order->status) }}</p>
+                                        @endif
                                         <div class="mt-4 flex justify-between text-sm"><span>{{ $this->t('current_quantity') }}</span><strong>{{ $order->current_quantity }} / {{ $order->quantity }} db</strong></div>
                                         @include('partials.production-progress-bar', ['order' => $order])
                                         <div class="mt-4 flex flex-wrap gap-2">
@@ -1540,10 +1551,10 @@ new class extends Component
                                             <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', 'bg-red-100 text-red-800' => $this->qualityCheckOverdue($order), 'bg-slate-100 text-slate-700' => ! $this->qualityCheckOverdue($order)])>
                                                 {{ $lastQualityCheck ? $this->t('last_quality_check_at', ['time' => $lastQualityCheck->copy()->timezone(config('app.display_timezone'))->format('Y-m-d H:i:s')]) : $this->t('no_quality_check_yet') }}
                                             </span>
-                                            @if ($this->qualityCheckOverdue($order))
+                                            @if ($runningOrder && $this->qualityCheckOverdue($runningOrder))
                                                 <span class="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">{{ $this->t('quality_check_overdue') }}</span>
                                             @endif
-                                            @if ($this->canCheckQuality())
+                                            @if ($runningOrder && $this->canCheckQuality())
                                                 <button wire:click.stop="openQualityModal({{ $order->id }})" class="rounded-md border border-teal-300 bg-white px-3 py-1 text-xs font-bold text-teal-800 hover:bg-teal-100">{{ $this->t($this->isColorCheckOnly() ? 'color_check' : 'quality_check') }}</button>
                                             @endif
                                             <button wire:click.stop="openProductionProtocol({{ $order->id }})" class="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100">{{ $this->t('production_protocol') }}</button>

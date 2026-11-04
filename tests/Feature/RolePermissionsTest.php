@@ -238,15 +238,30 @@ class RolePermissionsTest extends TestCase
     public function test_coordinator_can_be_assigned_a_task_and_start_it_like_an_operator(): void
     {
         $coordinator = User::factory()->create(['role' => Role::Coordinator]);
-        $order = Order::factory()->create(['status' => 'in_progress', 'assigned_operator_id' => $coordinator->id]);
+        $order = $this->makeOrder(['status' => 'in_progress', 'assigned_operator_id' => $coordinator->id]);
 
         Livewire::actingAs($coordinator)
             ->test('production-dashboard')
             ->call('selectTab', 'tasks')
             ->assertSee($order->order_number)
-            ->call('startAssignedTask', $order->id);
+            ->call('startAssignedTask', $order->id)
+            ->assertSet('showMeasuredModal', false);
 
         $this->assertSame('setup', $order->machine->fresh()->status);
+    }
+
+    public function test_assigning_an_operator_does_not_open_the_measured_data_modal(): void
+    {
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $order = $this->makeOrder(['status' => 'in_progress']);
+
+        Livewire::actingAs($coordinator)
+            ->test('production-dashboard')
+            ->call('assignOperator', $order->id, (string) $operator->id)
+            ->assertSet('showMeasuredModal', false);
+
+        $this->assertSame($operator->id, $order->fresh()->assigned_operator_id);
     }
 
     public function test_operator_starts_only_an_assigned_active_task_and_machine_enters_setup(): void
@@ -614,6 +629,40 @@ class RolePermissionsTest extends TestCase
         $this->assertTrue($component->instance()->shouldShowManageOrder($order->load('mould')));
         $component->call('openMachineDetail', $order->machine_id)
             ->assertSeeHtml('wire:click="openOrderModal('.$order->id.')"');
+    }
+
+    public function test_machine_header_keeps_the_last_closed_order_and_mould_without_showing_it_as_running(): void
+    {
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $orders = collect([
+            $this->makeOrder([
+                'status' => 'completed',
+                'order_number' => 'ORD-LAST-COMPLETED',
+                'ended_at' => now()->subDays(3),
+                'current_quantity' => 100,
+                'mould_id' => $this->makeMouldWithCavities(4)->id,
+            ]),
+            $this->makeOrder([
+                'status' => 'interrupted',
+                'order_number' => 'ORD-LAST-INTERRUPTED',
+                'last_paused_at' => now()->subDays(2),
+                'current_quantity' => 50,
+                'mould_id' => $this->makeMouldWithCavities(2)->id,
+            ]),
+        ]);
+        $component = Livewire::actingAs($operator)->test('production-dashboard');
+
+        foreach ($orders as $order) {
+            $machine = $component->instance()->machines->firstWhere('id', $order->machine_id);
+
+            $this->assertSame('idle', $component->instance()->machineState($machine));
+            $component->assertSee($order->order_number)
+                ->assertSeeHtml('border-l-slate-300')
+                ->call('openMachineDetail', $order->machine_id)
+                ->assertSee($order->order_number)
+                ->assertSee('Test mould')
+                ->assertSee('Jelenleg nincs futó megrendelő ezen a gépen.');
+        }
     }
 
     private function makeMouldWithCavities(int $cavities): Mould

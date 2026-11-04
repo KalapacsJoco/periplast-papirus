@@ -2,7 +2,7 @@
 <?php ($detailOrder = $detailMetrics->currentOrder() ?? $detailMetrics->nextActivatedOrder()); ?>
 <?php ($detailNextOrder = $detailMetrics->nextActivatedOrder()); ?>
 <?php ($detailNextOrder = $detailNextOrder?->is($detailOrder) ? null : $detailNextOrder); ?>
-<?php ($detailMould = $detailOrder?->mould); ?>
+<?php ($detailMould = ($detailOrder ?? $detailMetrics->lastClosedOrder())?->mould); ?>
 <div class="<?php echo \Illuminate\Support\Arr::toCssClasses(['space-y-4'=> ! ($inline ?? false), 'grid gap-4 lg:grid-cols-5' => ($inline ?? false)]); ?>">
     <div class="<?php echo \Illuminate\Support\Arr::toCssClasses(['grid gap-3 lg:grid-cols-2'=> ! ($inline ?? false), 'space-y-3 lg:col-span-2' => ($inline ?? false)]); ?>">
         <section class="rounded-lg border border-slate-200 px-3 py-2">

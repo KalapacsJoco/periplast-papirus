@@ -25,6 +25,19 @@ class MachineProductionMetrics
             ->first();
     }
 
+    public function lastClosedOrder(): ?Order
+    {
+        return $this->orders()
+            ->filter(fn (Order $order): bool => in_array($order->status, ['completed', 'interrupted'], true))
+            ->sort(function (Order $left, Order $right): int {
+                $leftTimestamp = ($left->ended_at ?? $left->last_paused_at ?? $left->updated_at)?->getTimestamp() ?? 0;
+                $rightTimestamp = ($right->ended_at ?? $right->last_paused_at ?? $right->updated_at)?->getTimestamp() ?? 0;
+
+                return ($rightTimestamp <=> $leftTimestamp) ?: (($right->id ?? 0) <=> ($left->id ?? 0));
+            })
+            ->first();
+    }
+
     public function nextActivatedOrder(): ?Order
     {
         return $this->orders()
