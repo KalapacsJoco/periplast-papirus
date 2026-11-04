@@ -511,9 +511,12 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
 
     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($showOrderModal): ?>
-        <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
+        <div wire:click.self="closeOrderModal" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
             <div class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
-                <h2 class="text-xl font-bold"><?php echo e($this->t('manage_order')); ?></h2>
+                <div class="flex items-center justify-between gap-3">
+                    <h2 class="text-xl font-bold"><?php echo e($this->t('manage_order')); ?></h2>
+                    <button wire:click="closeOrderModal" type="button" aria-label="<?php echo e($this->t('close')); ?>" class="rounded-md px-2 py-1 text-2xl font-bold leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-700">&times;</button>
+                </div>
                 <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->isProgrammer()): ?>
                     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($orderRequestedStatus): ?>
                         <p class="mt-5 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950" role="status">

@@ -45,6 +45,21 @@ class RolePermissionsTest extends TestCase
         $this->assertDatabaseCount('notifications', 3);
     }
 
+    public function test_order_modal_can_be_closed(): void
+    {
+        $programmer = User::factory()->create(['role' => Role::Programmer]);
+        $order = $this->makeOrder(['status' => 'in_progress']);
+
+        Livewire::actingAs($programmer)
+            ->test('production-dashboard')
+            ->call('openOrderModal', $order->id)
+            ->assertSet('showOrderModal', true)
+            ->assertSeeHtml('wire:click.self="closeOrderModal"')
+            ->assertSeeHtml('aria-label="Bezárás"')
+            ->call('closeOrderModal')
+            ->assertSet('showOrderModal', false);
+    }
+
     public function test_programmer_pausing_and_interrupting_orders_notifies_recipients(): void
     {
         $programmer = User::factory()->create(['role' => Role::Programmer]);
