@@ -706,6 +706,17 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                                     </label>
                                 <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                             <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                            <label class="text-sm font-semibold"><?php echo e($this->t('current_quantity')); ?> (<?php echo e($this->t('protocol_current_quantity_hint', ['last' => $protocolOrder->current_quantity, 'max' => $protocolOrder->quantity])); ?>)
+                                <input type="number" wire:model="protocolCurrentQuantity" min="<?php echo e($protocolOrder->current_quantity); ?>" max="<?php echo e($protocolOrder->quantity); ?>" class="mt-1 w-full rounded-md border-slate-300">
+                                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__errorArgs = ['protocolCurrentQuantity'];
+$__bag = $errors->getBag($__errorArgs[1] ?? 'default');
+if ($__bag->has($__errorArgs[0])) :
+if (isset($message)) { $__messageOriginal = $message; }
+$message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600"><?php echo e($message); ?></span><?php unset($message);
+if (isset($__messageOriginal)) { $message = $__messageOriginal; }
+endif;
+unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                            </label>
                             <label class="text-sm font-semibold"><?php echo e($this->t($protocolEntryType === 'resolved' ? 'resolution_description' : 'protocol_entry_note')); ?>
 
                                 <textarea wire:model="protocolEntryNote" rows="3" maxlength="2000" class="mt-1 w-full rounded-md border-slate-300"></textarea>

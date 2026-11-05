@@ -96,6 +96,7 @@ return [
     'protocol_resolved_note' => ':target-Problem: „:problem“ — Lösung: :solution',
     'protocol_stops_production' => 'Produktion stoppen',
     'protocol_change_cavities' => 'Kavitätenzahl ändern',
+    'protocol_current_quantity_hint' => 'zuletzt: :last, max: :max',
     'protocol_active_cavities' => 'Aktuelle (aktive) Kavitätenzahl nach dem Schließen',
     'protocol_active_cavities_note' => 'Aktive Kavitäten: :count / :total.',
     'protocol_stops_production_hint' => 'Ohne Haken wird eine Warnung (gelb) erfasst, mit Haken wird die Produktion gestoppt (rot).',

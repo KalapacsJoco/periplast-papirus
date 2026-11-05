@@ -96,6 +96,7 @@ return [
     'protocol_resolved_note' => ':target probléma: „:problem” — Megoldás: :solution',
     'protocol_stops_production' => 'Termelés leállítása',
     'protocol_change_cavities' => 'Fészekszám módosítása',
+    'protocol_current_quantity_hint' => 'utolsó: :last, max: :max',
     'protocol_active_cavities' => 'Aktuális (aktív) fészekszám a lezárás után',
     'protocol_active_cavities_note' => 'Aktív fészkek száma: :count / :total.',
     'protocol_stops_production_hint' => 'Bejelöletlenül figyelmeztetés (sárga) kerül rögzítésre, bejelölve a termelés leáll (piros).',

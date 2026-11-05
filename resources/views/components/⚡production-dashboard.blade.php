@@ -93,6 +93,8 @@ new class extends Component
 
     public ?int $protocolActiveCavities = null;
 
+    public ?int $protocolCurrentQuantity = null;
+
     public string $protocolResolveTarget = '';
 
     public string $flashMessage = '';
@@ -951,6 +953,7 @@ new class extends Component
         $this->protocolStopsProduction = false;
         $this->protocolChangesCavities = false;
         $this->protocolActiveCavities = null;
+        $this->protocolCurrentQuantity = null;
         $this->protocolResolveTarget = '';
         $this->resetValidation();
         $this->showProtocolModal = true;
@@ -959,12 +962,13 @@ new class extends Component
     public function addProductionProtocolEntry(): void
     {
         $this->ensureAuthenticated();
+        $order = Order::query()->findOrFail($this->protocolOrderId);
         $validated = $this->validate([
             'protocolEntryType' => ['required', Rule::in(['note', 'parameter_change', 'machine_issue', 'mould_issue', 'other', 'resolved'])],
             'protocolEntryNote' => ['required', 'string', 'max:2000'],
+            'protocolCurrentQuantity' => ['required', 'integer', 'min:'.(int) $order->current_quantity, 'max:'.(int) $order->quantity],
         ]);
 
-        $order = Order::query()->findOrFail($this->protocolOrderId);
         $type = $validated['protocolEntryType'];
         $note = $validated['protocolEntryNote'];
         $stop = $this->protocolStopsProduction;
@@ -1000,15 +1004,14 @@ new class extends Component
             $note .= ' '.$this->t('protocol_active_cavities_note', ['count' => $this->protocolActiveCavities, 'total' => $maxCavities]);
         }
 
-        // A lezárás előtti (régi fészekszámmal számolt) várható darabszám lesz az új számlálási alap.
+        // A megadott számlálóállás a bejegyzés új számlálási alapja, így a fészekszám-váltás után innen számol tovább.
         $restoreCavities = $type === 'resolved' && $target === 'mould' && $problem['equipment']->hasClosedCavities();
-        if ($changeCavities || $restoreCavities) {
-            $meta = ['expected_quantity' => max((int) $order->current_quantity, (int) $this->expectedQuantity($order))]
-                + ($changeCavities ? ['active_cavities' => $this->protocolActiveCavities] : ['active_cavities' => $problem['equipment']->cavity_count]);
-        } else {
-            $meta = [];
-        }
-        $order->appendProtocolEntry($order->current_quantity, $type, $note, $meta);
+        $meta = match (true) {
+            $changeCavities => ['active_cavities' => $this->protocolActiveCavities],
+            $restoreCavities => ['active_cavities' => $problem['equipment']->cavity_count],
+            default => [],
+        };
+        $order->appendProtocolEntry($validated['protocolCurrentQuantity'], $type, $note, $meta);
 
         match ($type) {
             'machine_issue', 'other' => $order->machine?->update([
@@ -1029,6 +1032,7 @@ new class extends Component
         $this->protocolStopsProduction = false;
         $this->protocolChangesCavities = false;
         $this->protocolActiveCavities = null;
+        $this->protocolCurrentQuantity = null;
         $this->flashMessage = $this->t('protocol_entry_saved');
     }
 
@@ -1130,7 +1134,7 @@ new class extends Component
                 && isset($entry['current_quantity']))
             ->map(fn (array $entry): array => [
                 'timestamp' => Carbon::parse($entry['timestamp']),
-                'quantity' => max(0, (int) data_get($entry, 'meta.expected_quantity', $entry['current_quantity'])),
+                'quantity' => max(0, (int) $entry['current_quantity']),
             ])
             ->filter(fn (array $entry): bool => $entry['timestamp']->greaterThanOrEqualTo($startedAt))
             ->sortBy(fn (array $entry): int => $entry['timestamp']->getTimestamp())
@@ -2008,6 +2012,10 @@ new class extends Component
                                     </label>
                                 @endif
                             @endif
+                            <label class="text-sm font-semibold">{{ $this->t('current_quantity') }} ({{ $this->t('protocol_current_quantity_hint', ['last' => $protocolOrder->current_quantity, 'max' => $protocolOrder->quantity]) }})
+                                <input type="number" wire:model="protocolCurrentQuantity" min="{{ $protocolOrder->current_quantity }}" max="{{ $protocolOrder->quantity }}" class="mt-1 w-full rounded-md border-slate-300">
+                                @error('protocolCurrentQuantity')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
+                            </label>
                             <label class="text-sm font-semibold">{{ $this->t($protocolEntryType === 'resolved' ? 'resolution_description' : 'protocol_entry_note') }}
                                 <textarea wire:model="protocolEntryNote" rows="3" maxlength="2000" class="mt-1 w-full rounded-md border-slate-300"></textarea>
                                 @error('protocolEntryNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror

@@ -774,6 +774,7 @@ class RolePermissionsTest extends TestCase
             ->call('openProductionProtocol', $order->id)
             ->set('protocolEntryType', 'parameter_change')
             ->set('protocolEntryNote', 'Injection pressure changed to 850 bar')
+            ->set('protocolCurrentQuantity', 10)
             ->call('addProductionProtocolEntry')
             ->assertSee('Injection pressure changed to 850 bar')
             ->assertSee('Protocol Operator')
@@ -800,6 +801,7 @@ class RolePermissionsTest extends TestCase
                     ->set('protocolEntryType', 'machine_issue')
                     ->set('protocolStopsProduction', $stop)
                     ->set('protocolEntryNote', 'Reason: '.$status)
+                    ->set('protocolCurrentQuantity', 5)
                     ->call('addProductionProtocolEntry')
                     ->assertHasNoErrors();
 
@@ -836,6 +838,9 @@ class RolePermissionsTest extends TestCase
             ->assertHasErrors(['protocolEntryNote' => 'required'])
             ->set('protocolEntryNote', 'Olaj utántöltve')
             ->call('addProductionProtocolEntry')
+            ->assertHasErrors(['protocolCurrentQuantity' => 'required'])
+            ->set('protocolCurrentQuantity', 20)
+            ->call('addProductionProtocolEntry')
             ->assertHasNoErrors();
 
         $this->assertSame('active', $order->machine->fresh()->status);
@@ -857,6 +862,7 @@ class RolePermissionsTest extends TestCase
             ->set('protocolEntryType', 'mould_issue')
             ->set('protocolStopsProduction', true)
             ->set('protocolEntryNote', 'Törött mag')
+            ->set('protocolCurrentQuantity', 30)
             ->call('addProductionProtocolEntry');
 
         $this->assertSame('paused', $order->fresh()->status);
@@ -865,6 +871,7 @@ class RolePermissionsTest extends TestCase
         $component->set('protocolEntryType', 'resolved')
             ->set('protocolResolveTarget', 'mould')
             ->set('protocolEntryNote', 'Mag cserélve')
+            ->set('protocolCurrentQuantity', 30)
             ->call('addProductionProtocolEntry')
             ->assertHasNoErrors();
 
@@ -904,6 +911,7 @@ class RolePermissionsTest extends TestCase
             ->call('openProductionProtocol', $order->id)
             ->set('protocolEntryType', 'resolved')
             ->set('protocolEntryNote', 'Fixed')
+            ->set('protocolCurrentQuantity', 1)
             ->call('addProductionProtocolEntry')
             ->assertForbidden();
 
@@ -920,6 +928,7 @@ class RolePermissionsTest extends TestCase
             ->call('openProductionProtocol', $order->id)
             ->set('protocolEntryType', 'mould_issue')
             ->set('protocolEntryNote', 'Kopott csap')
+            ->set('protocolCurrentQuantity', 0)
             ->call('addProductionProtocolEntry');
 
         $this->assertSame('warning', $order->mould->fresh()->status);
@@ -931,6 +940,7 @@ class RolePermissionsTest extends TestCase
             ->set('protocolEntryType', 'mould_issue')
             ->set('protocolStopsProduction', true)
             ->set('protocolEntryNote', 'Törött mag')
+            ->set('protocolCurrentQuantity', 0)
             ->call('addProductionProtocolEntry');
 
         $this->assertSame('needs_repair', $order->mould->fresh()->status);
