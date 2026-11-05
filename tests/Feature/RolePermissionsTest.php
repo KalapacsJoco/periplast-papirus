@@ -172,6 +172,7 @@ class RolePermissionsTest extends TestCase
             ->set('measuredNetWeight', 100)
             ->set('measuredGrossWeight', 110)
             ->set('measuredColorPercentage', 2)
+            ->set('measuredCurrentQuantity', 0)
             ->call('saveMeasuredData');
 
         $this->assertTrue($order->fresh()->hasMeasuredData());
@@ -390,6 +391,9 @@ class RolePermissionsTest extends TestCase
             ->set('measuredGrossWeight', 12.5)
             ->set('measuredColorPercentage', 2)
             ->call('saveMeasuredData')
+            ->assertHasErrors(['measuredCurrentQuantity' => 'required'])
+            ->set('measuredCurrentQuantity', 0)
+            ->call('saveMeasuredData')
             ->assertSet('showMeasuredModal', false);
 
         $order = $order->fresh();
@@ -408,6 +412,7 @@ class RolePermissionsTest extends TestCase
             ->test('production-dashboard')
             ->call('openMeasuredModal', $order->id)
             ->set('measuredGrossWeight', 12.7)
+            ->set('measuredCurrentQuantity', 0)
             ->call('saveMeasuredData');
 
         $second = collect($order->fresh()->production_protocol['entries'])->last()['meta']['changes'];

@@ -741,6 +741,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
 
     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($showMeasuredModal): ?>
+        <?php ($measuredOrder = \App\Models\Order::query()->find($measuredOrderId)); ?>
         <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
             <form wire:submit="saveMeasuredData" class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
                 <h2 class="text-xl font-bold"><?php echo e($this->t('measured_data')); ?></h2>
@@ -778,6 +779,14 @@ if (isset($__messageOriginal)) { $message = $__messageOriginal; }
 endif;
 unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></label>
                 </div>
+                <label class="mt-4 block text-sm font-semibold"><?php echo e($this->t('current_quantity')); ?> (<?php echo e($this->t('protocol_current_quantity_hint', ['last' => $measuredOrder?->current_quantity, 'max' => $measuredOrder?->quantity])); ?>)<input wire:model="measuredCurrentQuantity" type="number" min="<?php echo e($measuredOrder?->current_quantity); ?>" max="<?php echo e($measuredOrder?->quantity); ?>" class="mt-1 w-full rounded-md border-slate-300"><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__errorArgs = ['measuredCurrentQuantity'];
+$__bag = $errors->getBag($__errorArgs[1] ?? 'default');
+if ($__bag->has($__errorArgs[0])) :
+if (isset($message)) { $__messageOriginal = $message; }
+$message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600"><?php echo e($message); ?></span><?php unset($message);
+if (isset($__messageOriginal)) { $message = $__messageOriginal; }
+endif;
+unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></label>
                 <div class="mt-5 flex justify-end gap-3">
                     <button type="button" wire:click="$set('showMeasuredModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600"><?php echo e($this->t('cancel')); ?></button>
                     <button type="submit" wire:loading.attr="disabled" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white"><?php echo e($this->t('save')); ?></button>

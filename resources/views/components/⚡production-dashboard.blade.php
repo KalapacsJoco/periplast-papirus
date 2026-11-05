@@ -75,6 +75,8 @@ new class extends Component
 
     public $measuredColorPercentage = null;
 
+    public ?int $measuredCurrentQuantity = null;
+
     public string $qualityStatus = 'good';
 
     public string $quantityWarning = '';
@@ -722,6 +724,7 @@ new class extends Component
         $this->measuredNetWeight = $order->measured_net_weight;
         $this->measuredGrossWeight = $order->measured_gross_weight;
         $this->measuredColorPercentage = $order->measured_color_percentage;
+        $this->measuredCurrentQuantity = null;
         $this->resetValidation();
         $this->showMeasuredModal = true;
     }
@@ -729,21 +732,22 @@ new class extends Component
     public function saveMeasuredData(): void
     {
         $this->ensurePermission(Role::ENTER_MEASURED_DATA);
+        $order = Order::findOrFail($this->measuredOrderId);
         $validated = $this->validate([
             'measuredCycleSeconds' => ['required', 'numeric', 'gt:0'],
             'measuredNetWeight' => ['required', 'numeric', 'min:0'],
             'measuredGrossWeight' => ['required', 'numeric', 'min:0'],
             'measuredColorPercentage' => ['required', 'numeric', 'min:0'],
+            'measuredCurrentQuantity' => ['required', 'integer', 'min:'.(int) $order->current_quantity, 'max:'.(int) $order->quantity],
         ]);
 
-        $order = Order::findOrFail($this->measuredOrderId);
         $changes = $order->updateMeasured([
             'cycle_time' => (int) round((float) $validated['measuredCycleSeconds'] * 1000),
             'net_weight' => (float) $validated['measuredNetWeight'],
             'gross_weight' => (float) $validated['measuredGrossWeight'],
             'color_percentage' => (float) $validated['measuredColorPercentage'],
         ]);
-        $order->appendProtocolEntry($order->current_quantity, 'parameter_change', $this->t('measured_data_saved_note'), ['changes' => $changes]);
+        $order->appendProtocolEntry($validated['measuredCurrentQuantity'], 'parameter_change', $this->t('measured_data_saved_note'), ['changes' => $changes]);
 
         $this->showMeasuredModal = false;
         $this->flashMessage = $this->t('measured_data_saved');
@@ -2032,6 +2036,7 @@ new class extends Component
     @endif
 
     @if ($showMeasuredModal)
+        @php($measuredOrder = \App\Models\Order::query()->find($measuredOrderId))
         <div class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
             <form wire:submit="saveMeasuredData" class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
                 <h2 class="text-xl font-bold">{{ $this->t('measured_data') }}</h2>
@@ -2041,6 +2046,7 @@ new class extends Component
                     <label class="text-sm font-semibold">{{ $this->t('gross_weight') }} (g)<input wire:model="measuredGrossWeight" type="number" step="0.001" min="0" class="mt-1 w-full rounded-md border-slate-300">@error('measuredGrossWeight')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>
                     <label class="text-sm font-semibold">{{ $this->t('color_percentage') }} (%)<input wire:model="measuredColorPercentage" type="number" step="0.01" min="0" class="mt-1 w-full rounded-md border-slate-300">@error('measuredColorPercentage')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>
                 </div>
+                <label class="mt-4 block text-sm font-semibold">{{ $this->t('current_quantity') }} ({{ $this->t('protocol_current_quantity_hint', ['last' => $measuredOrder?->current_quantity, 'max' => $measuredOrder?->quantity]) }})<input wire:model="measuredCurrentQuantity" type="number" min="{{ $measuredOrder?->current_quantity }}" max="{{ $measuredOrder?->quantity }}" class="mt-1 w-full rounded-md border-slate-300">@error('measuredCurrentQuantity')<span class="text-xs text-red-600">{{ $message }}</span>@enderror</label>
                 <div class="mt-5 flex justify-end gap-3">
                     <button type="button" wire:click="$set('showMeasuredModal', false)" class="rounded-md px-4 py-2 text-sm font-bold text-slate-600">{{ $this->t('cancel') }}</button>
                     <button type="submit" wire:loading.attr="disabled" class="rounded-md bg-teal-700 px-4 py-2 text-sm font-bold text-white">{{ $this->t('save') }}</button>
