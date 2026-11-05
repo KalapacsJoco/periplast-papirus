@@ -41,6 +41,7 @@ class Order extends Model
         'measured_gross_weight',
         'measured_color_percentage',
         'measured_at',
+        'qm_approved_at',
         'additives_percentages',
         'production_protocol',
         'status',
@@ -70,6 +71,7 @@ class Order extends Model
         'measured_gross_weight' => 'decimal:3',
         'measured_color_percentage' => 'decimal:2',
         'measured_at' => 'datetime',
+        'qm_approved_at' => 'datetime',
         'additives_percentages' => 'array',
         'production_protocol' => 'array',
     ];

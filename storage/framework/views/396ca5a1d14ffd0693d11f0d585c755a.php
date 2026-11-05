@@ -145,7 +145,8 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                                     '[&>td:first-child]:border-l-slate-300' => $state === 'idle',
                                     '[&>td]:bg-amber-100 [&>td]:border-amber-300 [&>td:first-child]:border-l-amber-600' => $requestedStatus === 'completed',
                                     '[&>td]:bg-rose-100 [&>td]:border-rose-300 [&>td:first-child]:border-l-rose-600' => $requestedStatus === 'interrupted',
-                                ]); ?>" wire:click="toggleMachineRow(<?php echo e($machine->id); ?>)" wire:keydown.enter="toggleMachineRow(<?php echo e($machine->id); ?>)" role="button" tabindex="0" aria-expanded="<?php echo e($expandedMachineId === $machine->id ? 'true' : 'false'); ?>" title="<?php echo e($this->t('open_details')); ?>">
+                                    '[&>td]:!border-y-2 [&>td]:!border-red-600 [&>td:first-child]:!border-l-red-600 [&>td:last-child]:!border-r-2' => $runningOrder && $runningOrder->qm_approved_at === null,
+                                ]); ?>" wire:click="toggleMachineRow(<?php echo e($machine->id); ?>)" wire:keydown.enter="toggleMachineRow(<?php echo e($machine->id); ?>)" role="button" tabindex="0" aria-expanded="<?php echo e($expandedMachineId === $machine->id ? 'true' : 'false'); ?>" title="<?php echo e($runningOrder && $runningOrder->qm_approved_at === null ? $this->t('quality_not_approved') : $this->t('open_details')); ?>">
                                     <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($machine->name); ?></td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($machine->type); ?></td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($runningOrder && $this->qualityCheckOverdue($runningOrder)): ?><span class="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-black text-white" title="<?php echo e($this->t('quality_check_overdue')); ?>" aria-label="<?php echo e($this->t('quality_check_overdue')); ?>">!</span><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?><?php echo e($order?->product?->name ?? '-'); ?></td>
@@ -221,6 +222,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                             'border-slate-200 bg-white' => $state === 'idle',
                             'border-amber-400 bg-amber-100' => $requestedStatus === 'completed',
                             'border-rose-400 bg-rose-100' => $requestedStatus === 'interrupted',
+                            'border-2 !border-red-600' => $runningOrder && $runningOrder->qm_approved_at === null,
                         ]); ?>">
                             <div class="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
                                 <div>

@@ -865,6 +865,13 @@ new class extends Component
         ];
 
         $order->update($orderUpdates);
+        $approvedNow = $validated['qualityStatus'] === 'good'
+            && ! $isColorCheck
+            && $order->qm_approved_at === null
+            && $this->canDo(Role::APPROVE_QUALITY);
+        if ($approvedNow) {
+            $order->update(['qm_approved_at' => now()]);
+        }
         if ($qualityIssueId !== null) {
             $order->pauseForIssue('quality:'.$qualityIssueId, $validated['qualityProblemNote']);
         }
@@ -879,6 +886,12 @@ new class extends Component
                 .($validated['qualityStatus'] !== 'good' && filled($validated['qualityProblemNote'] ?? null) ? ': '.$validated['qualityProblemNote'] : ''),
             ['quality_status' => $validated['qualityStatus']]
         );
+        if ($approvedNow) {
+            $order->appendProtocolEntry($quantity, 'quality_approved', $this->t('quality_approved_note', [
+                'user' => Auth::user()->name,
+                'time' => $order->qm_approved_at->format('Y-m-d H:i'),
+            ]));
+        }
 
         $this->showQualityModal = false;
         $this->flashMessage = $followUpStatus === 'stopped'
@@ -1235,6 +1248,7 @@ new class extends Component
         return match ($type) {
             'machine_issue', 'mould_issue', 'issue' => ['container' => 'border-l-4 border-red-500 bg-red-50', 'badge' => 'bg-red-100 text-red-800', 'icon' => '!'],
             'parameter_change' => ['container' => 'border-l-4 border-amber-500 bg-amber-50', 'badge' => 'bg-amber-100 text-amber-800', 'icon' => '⚙'],
+            'quality_approved' => ['container' => 'border-l-4 border-emerald-600 bg-emerald-50', 'badge' => 'bg-emerald-100 text-emerald-800', 'icon' => '✔'],
             'machine_status', 'mould_status' => ['container' => 'border-l-4 border-blue-500 bg-blue-50', 'badge' => 'bg-blue-100 text-blue-800', 'icon' => '↻'],
             'assignment', 'task_started' => ['container' => 'border-l-4 border-violet-500 bg-violet-50', 'badge' => 'bg-violet-100 text-violet-800', 'icon' => '▶'],
             'order_status', 'production_update' => ['container' => 'border-l-4 border-cyan-500 bg-cyan-50', 'badge' => 'bg-cyan-100 text-cyan-800', 'icon' => '↔'],
@@ -1485,7 +1499,8 @@ new class extends Component
                                     '[&>td:first-child]:border-l-slate-300' => $state === 'idle',
                                     '[&>td]:bg-amber-100 [&>td]:border-amber-300 [&>td:first-child]:border-l-amber-600' => $requestedStatus === 'completed',
                                     '[&>td]:bg-rose-100 [&>td]:border-rose-300 [&>td:first-child]:border-l-rose-600' => $requestedStatus === 'interrupted',
-                                ]) wire:click="toggleMachineRow({{ $machine->id }})" wire:keydown.enter="toggleMachineRow({{ $machine->id }})" role="button" tabindex="0" aria-expanded="{{ $expandedMachineId === $machine->id ? 'true' : 'false' }}" title="{{ $this->t('open_details') }}">
+                                    '[&>td]:!border-y-2 [&>td]:!border-red-600 [&>td:first-child]:!border-l-red-600 [&>td:last-child]:!border-r-2' => $runningOrder && $runningOrder->qm_approved_at === null,
+                                ]) wire:click="toggleMachineRow({{ $machine->id }})" wire:keydown.enter="toggleMachineRow({{ $machine->id }})" role="button" tabindex="0" aria-expanded="{{ $expandedMachineId === $machine->id ? 'true' : 'false' }}" title="{{ $runningOrder && $runningOrder->qm_approved_at === null ? $this->t('quality_not_approved') : $this->t('open_details') }}">
                                     <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->name }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->type }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($runningOrder && $this->qualityCheckOverdue($runningOrder))<span class="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-black text-white" title="{{ $this->t('quality_check_overdue') }}" aria-label="{{ $this->t('quality_check_overdue') }}">!</span>@endif{{ $order?->product?->name ?? '-' }}</td>
@@ -1561,6 +1576,7 @@ new class extends Component
                             'border-slate-200 bg-white' => $state === 'idle',
                             'border-amber-400 bg-amber-100' => $requestedStatus === 'completed',
                             'border-rose-400 bg-rose-100' => $requestedStatus === 'interrupted',
+                            'border-2 !border-red-600' => $runningOrder && $runningOrder->qm_approved_at === null,
                         ])>
                             <div class="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
                                 <div>

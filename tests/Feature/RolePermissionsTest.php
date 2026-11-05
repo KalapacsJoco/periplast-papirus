@@ -24,7 +24,7 @@ class RolePermissionsTest extends TestCase
         $this->assertSame([Role::ACTIVATE_ORDER, Role::PAUSE_ORDER, Role::INTERRUPT_ORDER], Role::Programmer->permissions());
         $this->assertSame([Role::ASSIGN_ORDER, Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHANGE_CAVITIES, Role::CHECK_QUALITY, Role::CHECK_COLOR, Role::ENTER_MEASURED_DATA], Role::Coordinator->permissions());
         $this->assertSame([Role::START_MACHINE, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING, Role::CHANGE_CAVITIES, Role::CHECK_COLOR, Role::ENTER_MEASURED_DATA], Role::Operator->permissions());
-        $this->assertSame([Role::CHECK_QUALITY, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING], Role::QualityManager->permissions());
+        $this->assertSame([Role::CHECK_QUALITY, Role::APPROVE_QUALITY, Role::STOP_MACHINE, Role::REPORT_EQUIPMENT_WARNING], Role::QualityManager->permissions());
     }
 
     public function test_programmer_order_activation_notifies_coordinator_and_all_operators(): void
