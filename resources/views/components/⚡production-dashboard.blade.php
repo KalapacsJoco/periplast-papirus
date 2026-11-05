@@ -89,6 +89,10 @@ new class extends Component
 
     public bool $protocolStopsProduction = false;
 
+    public bool $protocolChangesCavities = false;
+
+    public ?int $protocolActiveCavities = null;
+
     public string $protocolResolveTarget = '';
 
     public string $flashMessage = '';
@@ -231,7 +235,7 @@ new class extends Component
     public function machines()
     {
         return Machine::query()
-            ->with(['orders' => fn ($query) => $this->boardOrders($query, ['mould:id,name,number,cavity_count,status,problem_description', 'product:id,name,code'])])
+            ->with(['orders' => fn ($query) => $this->boardOrders($query, ['mould:id,name,number,cavity_count,active_cavityes,status,problem_description', 'product:id,name,code'])])
             ->orderBy('name')
             ->get();
     }
@@ -945,6 +949,8 @@ new class extends Component
         $this->protocolEntryType = 'note';
         $this->protocolEntryNote = '';
         $this->protocolStopsProduction = false;
+        $this->protocolChangesCavities = false;
+        $this->protocolActiveCavities = null;
         $this->protocolResolveTarget = '';
         $this->resetValidation();
         $this->showProtocolModal = true;
@@ -986,7 +992,23 @@ new class extends Component
             $this->ensurePermission($stop ? Role::STOP_MACHINE : Role::REPORT_EQUIPMENT_WARNING);
         }
 
-        $order->appendProtocolEntry($order->current_quantity, $type, $note);
+        $changeCavities = $type === 'mould_issue' && $this->protocolChangesCavities;
+        if ($changeCavities) {
+            $this->ensurePermission(Role::CHANGE_CAVITIES);
+            $maxCavities = (int) $order->mould?->cavity_count;
+            $this->validate(['protocolActiveCavities' => ['required', 'integer', 'min:1', 'max:'.max(1, $maxCavities)]]);
+            $note .= ' '.$this->t('protocol_active_cavities_note', ['count' => $this->protocolActiveCavities, 'total' => $maxCavities]);
+        }
+
+        // A lezárás előtti (régi fészekszámmal számolt) várható darabszám lesz az új számlálási alap.
+        $restoreCavities = $type === 'resolved' && $target === 'mould' && $problem['equipment']->hasClosedCavities();
+        if ($changeCavities || $restoreCavities) {
+            $meta = ['expected_quantity' => max((int) $order->current_quantity, (int) $this->expectedQuantity($order))]
+                + ($changeCavities ? ['active_cavities' => $this->protocolActiveCavities] : ['active_cavities' => $problem['equipment']->cavity_count]);
+        } else {
+            $meta = [];
+        }
+        $order->appendProtocolEntry($order->current_quantity, $type, $note, $meta);
 
         match ($type) {
             'machine_issue', 'other' => $order->machine?->update([
@@ -996,7 +1018,7 @@ new class extends Component
             'mould_issue' => $order->mould?->update([
                 'status' => $stop ? 'needs_repair' : 'warning',
                 'problem_description' => $note,
-            ]),
+            ] + ($changeCavities ? ['active_cavityes' => $this->protocolActiveCavities] : [])),
             'resolved' => $this->resolveProblem($problem, $target),
             default => null,
         };
@@ -1005,6 +1027,8 @@ new class extends Component
         $this->protocolEntryNote = '';
         $this->protocolResolveTarget = '';
         $this->protocolStopsProduction = false;
+        $this->protocolChangesCavities = false;
+        $this->protocolActiveCavities = null;
         $this->flashMessage = $this->t('protocol_entry_saved');
     }
 
@@ -1092,7 +1116,7 @@ new class extends Component
     public function expectedQuantity(Order $order): ?int
     {
         $cycleMs = $order->measured_cycle_time;
-        $cavities = $order->mould?->cavity_count;
+        $cavities = $order->mould?->producingCavities();
         $startedAt = $this->productionStartedAt($order);
 
         if (! $startedAt || ! $cycleMs || ! $cavities || $order->quantity <= 0) {
@@ -1106,7 +1130,7 @@ new class extends Component
                 && isset($entry['current_quantity']))
             ->map(fn (array $entry): array => [
                 'timestamp' => Carbon::parse($entry['timestamp']),
-                'quantity' => max(0, (int) $entry['current_quantity']),
+                'quantity' => max(0, (int) data_get($entry, 'meta.expected_quantity', $entry['current_quantity'])),
             ])
             ->filter(fn (array $entry): bool => $entry['timestamp']->greaterThanOrEqualTo($startedAt))
             ->sortBy(fn (array $entry): int => $entry['timestamp']->getTimestamp())
@@ -1121,7 +1145,7 @@ new class extends Component
     public function remainingProductionMilliseconds(Order $order): ?int
     {
         $measuredCycleTime = $order->measured_cycle_time;
-        $cavities = $order->mould?->cavity_count;
+        $cavities = $order->mould?->producingCavities();
 
         if ($order->status !== 'in_progress' || ! $measuredCycleTime || ! $cavities || $order->quantity <= 0) {
             return null;
@@ -1267,6 +1291,9 @@ new class extends Component
 
         $equipment = $problem['equipment'];
         $equipment->update(['status' => 'active', 'problem_description' => null]);
+        if ($target === 'mould' && $equipment->hasClosedCavities()) {
+            $equipment->update(['active_cavityes' => $equipment->cavity_count]);
+        }
         Order::resolveEquipmentIssue($target, $equipment->id);
     }
 
@@ -1461,7 +1488,7 @@ new class extends Component
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order ? number_format($order->quantity, 0, ',', ' ') : '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order ? number_format($order->current_quantity, 0, ',', ' ') : '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->quantityAtYesterdaySameTime($order) ?? '-' }}</td>
-                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $order?->mould?->cavity_count ?? '-' }}</td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->mould?->hasClosedCavities())<span class="font-bold text-red-600" title="{{ $this->t('cavity_count') }}: {{ $order->mould->cavity_count }}">{{ $order->mould->active_cavityes }}</span>@else{{ $order?->mould?->cavity_count ?? '-' }}@endif</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_cycle_time !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('cycle_time')]) title="{{ $this->t('theoretical') }}: {{ $order?->cycle_time === null ? '-' : number_format($order->cycle_time / 1000, 2, ',', ' ') }}">{{ number_format($order->measured_cycle_time / 1000, 2, ',', ' ') }}</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->cycle_time === null ? '-' : number_format($order->cycle_time / 1000, 2, ',', ' ') }}</span>@endif</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ ($utilization = $metrics->utilizationLast24Hours($order)) === null ? '-' : number_format($utilization, 1, ',', ' ').'%' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $metrics->theoreticalDailyProduction($order) ?? '-' }}</td>
@@ -1968,6 +1995,18 @@ new class extends Component
                                     {{ $this->t('protocol_stops_production') }}
                                 </label>
                                 <p class="-mt-2 text-xs text-slate-500">{{ $this->t('protocol_stops_production_hint') }}</p>
+                            @endif
+                            @if ($protocolEntryType === 'mould_issue' && Auth::user()->role->allows(\App\Enums\Role::CHANGE_CAVITIES))
+                                <label class="flex items-center gap-2 text-sm font-semibold">
+                                    <input type="checkbox" wire:model.live="protocolChangesCavities" class="rounded border-slate-300">
+                                    {{ $this->t('protocol_change_cavities') }}
+                                </label>
+                                @if ($protocolChangesCavities)
+                                    <label class="text-sm font-semibold">{{ $this->t('protocol_active_cavities') }} ({{ $this->t('cavity_count') }}: {{ $protocolOrder->mould?->cavity_count ?? '-' }})
+                                        <input type="number" wire:model="protocolActiveCavities" min="1" max="{{ $protocolOrder->mould?->cavity_count }}" class="mt-1 w-full rounded-md border-slate-300">
+                                        @error('protocolActiveCavities')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
+                                    </label>
+                                @endif
                             @endif
                             <label class="text-sm font-semibold">{{ $this->t($protocolEntryType === 'resolved' ? 'resolution_description' : 'protocol_entry_note') }}
                                 <textarea wire:model="protocolEntryNote" rows="3" maxlength="2000" class="mt-1 w-full rounded-md border-slate-300"></textarea>

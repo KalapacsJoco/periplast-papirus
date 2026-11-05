@@ -13,6 +13,18 @@ class Mould extends Model
 
     protected static function booted(): void
     {
+        static::saving(function (Mould $mould): void {
+            if ($mould->cavity_count === null) {
+                return;
+            }
+
+            if ($mould->active_cavityes === null) {
+                $mould->active_cavityes = $mould->cavity_count;
+            }
+
+            $mould->active_cavityes = min((int) $mould->active_cavityes, (int) $mould->cavity_count);
+        });
+
         static::updated(function (Mould $mould): void {
             if (! $mould->wasChanged('status')) {
                 return;
@@ -39,6 +51,7 @@ class Mould extends Model
         'place',
         'number',
         'cavity_count',
+        'active_cavityes',
         'open_mm',
         'description',
         'status',
@@ -52,6 +65,16 @@ class Mould extends Model
         'temper',
         'temper_water_circuit',
     ];
+
+    public function producingCavities(): ?int
+    {
+        return $this->active_cavityes ?? $this->cavity_count;
+    }
+
+    public function hasClosedCavities(): bool
+    {
+        return $this->cavity_count !== null && $this->active_cavityes !== null && $this->active_cavityes < $this->cavity_count;
+    }
 
     public function products(): BelongsToMany
     {

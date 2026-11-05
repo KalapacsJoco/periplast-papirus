@@ -156,7 +156,7 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($order ? number_format($order->quantity, 0, ',', ' ') : '-'); ?></td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($order ? number_format($order->current_quantity, 0, ',', ' ') : '-'); ?></td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($metrics->quantityAtYesterdaySameTime($order) ?? '-'); ?></td>
-                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($order?->mould?->cavity_count ?? '-'); ?></td>
+                                    <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($order?->mould?->hasClosedCavities()): ?><span class="font-bold text-red-600" title="<?php echo e($this->t('cavity_count')); ?>: <?php echo e($order->mould->cavity_count); ?>"><?php echo e($order->mould->active_cavityes); ?></span><?php else: ?><?php echo e($order?->mould?->cavity_count ?? '-'); ?><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($order?->measured_cycle_time !== null): ?><span class="<?php echo \Illuminate\Support\Arr::toCssClasses(['font-bold text-red-600' => $order->measuredDeviates('cycle_time')]); ?>" title="<?php echo e($this->t('theoretical')); ?>: <?php echo e($order?->cycle_time === null ? '-' : number_format($order->cycle_time / 1000, 2, ',', ' ')); ?>"><?php echo e(number_format($order->measured_cycle_time / 1000, 2, ',', ' ')); ?></span><?php else: ?><span class="text-slate-400" title="<?php echo e($this->t('theoretical')); ?>"><?php echo e($order?->cycle_time === null ? '-' : number_format($order->cycle_time / 1000, 2, ',', ' ')); ?></span><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?></td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e(($utilization = $metrics->utilizationLast24Hours($order)) === null ? '-' : number_format($utilization, 1, ',', ' ').'%'); ?></td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50"><?php echo e($metrics->theoreticalDailyProduction($order) ?? '-'); ?></td>
@@ -685,6 +685,26 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
 
                                 </label>
                                 <p class="-mt-2 text-xs text-slate-500"><?php echo e($this->t('protocol_stops_production_hint')); ?></p>
+                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($protocolEntryType === 'mould_issue' && Auth::user()->role->allows(\App\Enums\Role::CHANGE_CAVITIES)): ?>
+                                <label class="flex items-center gap-2 text-sm font-semibold">
+                                    <input type="checkbox" wire:model.live="protocolChangesCavities" class="rounded border-slate-300">
+                                    <?php echo e($this->t('protocol_change_cavities')); ?>
+
+                                </label>
+                                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($protocolChangesCavities): ?>
+                                    <label class="text-sm font-semibold"><?php echo e($this->t('protocol_active_cavities')); ?> (<?php echo e($this->t('cavity_count')); ?>: <?php echo e($protocolOrder->mould?->cavity_count ?? '-'); ?>)
+                                        <input type="number" wire:model="protocolActiveCavities" min="1" max="<?php echo e($protocolOrder->mould?->cavity_count); ?>" class="mt-1 w-full rounded-md border-slate-300">
+                                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__errorArgs = ['protocolActiveCavities'];
+$__bag = $errors->getBag($__errorArgs[1] ?? 'default');
+if ($__bag->has($__errorArgs[0])) :
+if (isset($message)) { $__messageOriginal = $message; }
+$message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600"><?php echo e($message); ?></span><?php unset($message);
+if (isset($__messageOriginal)) { $message = $__messageOriginal; }
+endif;
+unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                                    </label>
+                                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                             <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                             <label class="text-sm font-semibold"><?php echo e($this->t($protocolEntryType === 'resolved' ? 'resolution_description' : 'protocol_entry_note')); ?>
 

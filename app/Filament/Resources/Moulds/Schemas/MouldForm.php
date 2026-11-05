@@ -32,6 +32,13 @@ class MouldForm
                     ->numeric()
                     ->minValue(1)
                     ->required(),
+                TextInput::make('active_cavityes')
+                    ->label('Aktív fészkek száma')
+                    ->numeric()
+                    ->minValue(0)
+                    ->maxValue(fn (callable $get) => $get('cavity_count') ?: null)
+                    ->default(fn (callable $get) => $get('cavity_count'))
+                    ->helperText('Üresen hagyva megegyezik a fészekszámmal; nem lehet nagyobb annál.'),
                 TextInput::make('open_mm')
                     ->label('Nyitas (mm)')
                     ->numeric()

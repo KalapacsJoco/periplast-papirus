@@ -26,6 +26,8 @@ enum Role: string
 
     public const REPORT_EQUIPMENT_WARNING = 'equipment.report_warning';
 
+    public const CHANGE_CAVITIES = 'mould.change_cavities';
+
     public const CHECK_QUALITY = 'quality.check';
 
     public const CHECK_COLOR = 'quality.check_color';
@@ -38,9 +40,9 @@ enum Role: string
         return match ($this) {
             self::Admin => [self::PERMISSION_ALL],
             self::Programmer => [self::ACTIVATE_ORDER, self::PAUSE_ORDER, self::INTERRUPT_ORDER],
-            self::Operator => [self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
+            self::Operator => [self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHANGE_CAVITIES, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
             self::QualityManager => [self::CHECK_QUALITY, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING],
-            self::Coordinator => [self::ASSIGN_ORDER, self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHECK_QUALITY, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
+            self::Coordinator => [self::ASSIGN_ORDER, self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHANGE_CAVITIES, self::CHECK_QUALITY, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
         };
     }
 
