@@ -5,21 +5,36 @@ use App\Enums\Role;
 use App\Models\Machine;
 use App\Models\Mould;
 use App\Models\Order;
+use App\Models\Photo;
 use App\Models\Product;
+use App\Models\SpecialPermissionRequest;
 use App\Models\User;
 use App\Notifications\OrderWorkflowNotification;
+use App\Notifications\SpecialPermissionNotification;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 new class extends Component
 {
+    use WithFileUploads;
+
     public string $activeTab = 'machines';
+
+    public string $specialReason = '';
+
+    /** @var array<int, \Livewire\Features\SupportFileUploads\TemporaryUploadedFile> */
+    public array $specialPhotos = [];
+
+    /** @var array<int, string> */
+    public array $decisionNotes = [];
 
     public string $orderGroup = 'active';
 
@@ -215,7 +230,7 @@ new class extends Component
         return match ($tab) {
             'machines', 'orders', 'notifications', 'maintenance', 'calculators', 'help' => true,
             'tasks' => $this->isAdmin() || $this->canDo(Role::ASSIGN_ORDER) || $this->canDo(Role::CHECK_COLOR),
-            'moulds', 'products' => $this->isAdmin(),
+            'moulds', 'products', 'admin_tasks' => $this->isAdmin(),
             default => false,
         };
     }
@@ -288,6 +303,7 @@ new class extends Component
             || ($order !== null && (
                 ! in_array($order->mould?->status, ['active', 'warning'], true)
                 || $this->qualityStatus($order) === 'quality_issue'
+                || $order->hasPendingSpecialPermission()
             ))
         ) {
             return 'stopped';
@@ -775,6 +791,8 @@ new class extends Component
         $this->qualityProblemType = $this->qualityProblemTypes()[0];
         $this->qualityProblemNote = '';
         $this->quantityWarning = '';
+        $this->specialReason = '';
+        $this->specialPhotos = [];
         $this->resetValidation();
         $this->showQualityModal = true;
     }
@@ -799,11 +817,20 @@ new class extends Component
         abort_unless(! $this->hasOpenQualityIssues($order), 422, $this->t('resolve_quality_issue_first'));
         $isColorCheck = $this->isColorCheckOnly();
         $validated = $this->validate([
-            'qualityStatus' => ['required', Rule::in(['good', 'warning', 'quality_issue'])],
+            'qualityStatus' => ['required', Rule::in($this->canRequestSpecialPermission() ? ['good', 'warning', 'quality_issue', 'special_permission'] : ['good', 'warning', 'quality_issue'])],
             'currentQuantity' => ['required', 'integer', 'min:0'],
-            'qualityProblemType' => ['required_unless:qualityStatus,good', 'nullable', Rule::in($this->qualityProblemTypes())],
-            'qualityProblemNote' => ['nullable', 'string', 'max:1000', Rule::requiredIf($this->qualityStatus !== 'good')],
+            'qualityProblemType' => ['required_unless:qualityStatus,good,special_permission', 'nullable', Rule::in($this->qualityProblemTypes())],
+            'qualityProblemNote' => ['nullable', 'string', 'max:1000', Rule::requiredIf(! in_array($this->qualityStatus, ['good', 'special_permission'], true))],
         ]);
+
+        $wantsSpecial = $validated['qualityStatus'] === 'special_permission';
+        if ($wantsSpecial) {
+            $this->validate([
+                'specialReason' => ['required', 'string', 'max:2000'],
+                'specialPhotos' => ['array', 'max:5'],
+                'specialPhotos.*' => ['image', 'max:10240'],
+            ]);
+        }
 
         abort_unless($order->hasMeasuredData(), 422, $this->t('measured_data_required'));
         $quantity = min($validated['currentQuantity'], $order->quantity);
@@ -825,6 +852,17 @@ new class extends Component
         }
 
         $this->quantityWarning = '';
+
+        if ($wantsSpecial) {
+            $this->createSpecialPermissionRequest($order, null, $quantity);
+            $this->specialReason = '';
+            $this->specialPhotos = [];
+            $this->showQualityModal = false;
+            $this->flashMessage = $this->t('special_requested_flash');
+            unset($this->machines);
+
+            return;
+        }
 
         $protocol = $order->production_protocol ?? [];
         $checks = $protocol['quality_checks'] ?? [];
@@ -892,12 +930,136 @@ new class extends Component
                 'time' => $order->qm_approved_at->format('Y-m-d H:i'),
             ]));
         }
-
         $this->showQualityModal = false;
         $this->flashMessage = $followUpStatus === 'stopped'
             ? $this->t('quality_issue_stopped')
             : $this->t('quality_check_saved');
         unset($this->machines);
+    }
+
+    public function canRequestSpecialPermission(): bool
+    {
+        return $this->canDo(Role::REQUEST_SPECIAL_PERMISSION) && ! $this->isColorCheckOnly();
+    }
+
+    private function createSpecialPermissionRequest(Order $order, ?string $qualityIssueId, int $quantity): void
+    {
+        $request = SpecialPermissionRequest::create([
+            'product_id' => $order->product_id,
+            'order_id' => $order->id,
+            'quality_issue_id' => $qualityIssueId,
+            'requested_by' => Auth::id(),
+            'reason' => $this->specialReason,
+            'status' => 'pending',
+        ]);
+
+        foreach ($this->specialPhotos as $upload) {
+            $request->photos()->create(Photo::attributesFromUpload($upload, Auth::id()));
+        }
+
+        $order->pauseForIssue('special:'.$request->id, $this->specialReason);
+        $order->appendProtocolEntry($quantity, 'special_permission_requested',
+            $this->t('special_requested_note', ['user' => Auth::user()->name, 'reason' => $this->specialReason]),
+            ['special_permission_request_id' => $request->id]
+        );
+
+        $notification = new SpecialPermissionNotification($request, 'special_requested', Auth::user()->name);
+        User::query()->where('role', Role::Admin->value)->each(fn (User $admin) => $admin->notify($notification));
+
+        if (filled(config('papirus.admin_email'))) {
+            try {
+                Notification::route('mail', config('papirus.admin_email'))->notify($notification);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+    }
+
+    public function decideSpecialPermission(int $requestId, bool $approve): void
+    {
+        abort_unless($this->isAdmin(), 403);
+        $request = SpecialPermissionRequest::query()->where('status', 'pending')->findOrFail($requestId);
+        $note = trim($this->decisionNotes[$requestId] ?? '');
+        $request->update([
+            'status' => $approve ? 'approved' : 'rejected',
+            'decided_by' => Auth::id(),
+            'decided_at' => now(),
+            'decision_note' => $note !== '' ? $note : null,
+        ]);
+
+        $order = $request->order;
+        if ($order !== null) {
+            $protocol = $order->production_protocol ?? [];
+            $issueId = $request->quality_issue_id;
+
+            if ($approve && $issueId !== null) {
+                $issues = collect($protocol['quality_issues'] ?? [])->map(function (array $issue) use ($issueId): array {
+                    if (($issue['id'] ?? null) === $issueId) {
+                        $issue['status'] = 'resolved';
+                        $issue['resolved_at'] = now()->toIso8601String();
+                        $issue['resolved_by'] = Auth::user()->name;
+                        $issue['resolution'] = 'special_permission';
+                    }
+
+                    return $issue;
+                })->all();
+                $stillOpen = collect($issues)->contains(fn (array $issue): bool => ($issue['status'] ?? 'open') === 'open');
+                $protocol['quality_issues'] = $issues;
+                $protocol['quality_status'] = $stillOpen ? 'quality_issue' : 'warning';
+                $order->update(['production_protocol' => $protocol]);
+            }
+
+            $quantity = (int) $order->fresh()->current_quantity;
+            $order->appendProtocolEntry($quantity,
+                $approve ? 'special_permission_approved' : 'special_permission_rejected',
+                $this->t($approve ? 'special_approved_note' : 'special_rejected_note', ['user' => Auth::user()->name])
+                    .($note !== '' ? ': '.$note : ''),
+                ['special_permission_request_id' => $request->id]
+            );
+
+            if ($approve) {
+                if ($issueId !== null) {
+                    $order->fresh()->resolveIssuePause('quality:'.$issueId);
+                }
+                $order->fresh()->resolveIssuePause('special:'.$request->id);
+            }
+        }
+
+        $event = $approve ? 'special_approved' : 'special_rejected';
+        $notification = new SpecialPermissionNotification($request, $event, Auth::user()->name);
+        $roles = $approve
+            ? [Role::Coordinator->value, Role::Operator->value, Role::QualityManager->value]
+            : [];
+        User::query()
+            ->where(fn ($query) => $query->whereIn('role', $roles)->orWhere('id', $request->requested_by))
+            ->each(fn (User $recipient) => $recipient->notify($notification));
+
+        unset($this->specialPermissionRequests, $this->pendingSpecialPermissionCount, $this->machines);
+        $this->flashMessage = $this->t($approve ? 'special_approved_flash' : 'special_rejected_flash');
+    }
+
+    #[Computed]
+    public function specialPermissionRequests()
+    {
+        return SpecialPermissionRequest::query()
+            ->with(['product', 'order.machine', 'requester', 'photos'])
+            ->where('status', 'pending')
+            ->oldest()
+            ->get();
+    }
+
+    #[Computed]
+    public function pendingSpecialPermissionCount(): int
+    {
+        return $this->isAdmin() ? SpecialPermissionRequest::query()->where('status', 'pending')->count() : 0;
+    }
+
+    public function specialRequestPhotos(int $requestId)
+    {
+        return Photo::query()
+            ->where('photoable_type', (new SpecialPermissionRequest)->getMorphClass())
+            ->where('photoable_id', $requestId)
+            ->get();
     }
 
     public function assignOperator(int $orderId, string $operatorId): void
@@ -1065,6 +1227,7 @@ new class extends Component
         $replace = [
             'order' => $data['order_number'] ?? '',
             'actor' => $data['actor'] ?? '',
+            'product' => $data['product'] ?? '',
         ];
 
         return match ($data['event'] ?? '') {
@@ -1074,6 +1237,9 @@ new class extends Component
             'completion_requested' => $this->t('notification_completion_requested', $replace),
             'interruption_requested' => $this->t('notification_interruption_requested', $replace),
             'assigned' => $this->t('notification_assigned', $replace),
+            'special_requested' => $this->t('notification_special_requested', $replace),
+            'special_approved' => $this->t('notification_special_approved', $replace),
+            'special_rejected' => $this->t('notification_special_rejected', $replace),
             default => $this->t('notification_unknown'),
         };
     }
@@ -1249,6 +1415,9 @@ new class extends Component
             'machine_issue', 'mould_issue', 'issue' => ['container' => 'border-l-4 border-red-500 bg-red-50', 'badge' => 'bg-red-100 text-red-800', 'icon' => '!'],
             'parameter_change' => ['container' => 'border-l-4 border-amber-500 bg-amber-50', 'badge' => 'bg-amber-100 text-amber-800', 'icon' => '⚙'],
             'quality_approved' => ['container' => 'border-l-4 border-emerald-600 bg-emerald-50', 'badge' => 'bg-emerald-100 text-emerald-800', 'icon' => '✔'],
+            'special_permission_requested' => ['container' => 'border-l-4 border-orange-500 bg-orange-50', 'badge' => 'bg-orange-100 text-orange-800', 'icon' => '?'],
+            'special_permission_approved' => ['container' => 'border-l-4 border-emerald-600 bg-emerald-50', 'badge' => 'bg-emerald-100 text-emerald-800', 'icon' => '✔'],
+            'special_permission_rejected' => ['container' => 'border-l-4 border-red-500 bg-red-50', 'badge' => 'bg-red-100 text-red-800', 'icon' => '✕'],
             'machine_status', 'mould_status' => ['container' => 'border-l-4 border-blue-500 bg-blue-50', 'badge' => 'bg-blue-100 text-blue-800', 'icon' => '↻'],
             'assignment', 'task_started' => ['container' => 'border-l-4 border-violet-500 bg-violet-50', 'badge' => 'bg-violet-100 text-violet-800', 'icon' => '▶'],
             'order_status', 'production_update' => ['container' => 'border-l-4 border-cyan-500 bg-cyan-50', 'badge' => 'bg-cyan-100 text-cyan-800', 'icon' => '↔'],
@@ -1259,6 +1428,14 @@ new class extends Component
     /** Resolves a selected equipment or quality fault and resumes only automatically paused orders that are ready. */
     private function resolveProblem(array $problem, string $target): void
     {
+        if (str_starts_with($target, 'special:')) {
+            $requestId = (int) substr($target, strlen('special:'));
+            SpecialPermissionRequest::query()->whereKey($requestId)->where('status', 'rejected')->update(['status' => 'closed']);
+            $problem['order']->fresh()->resolveIssuePause($target);
+
+            return;
+        }
+
         if (str_starts_with($target, 'quality:')) {
             /** @var Order $order */
             $order = $problem['order'];
@@ -1377,6 +1554,15 @@ new class extends Component
             ];
         }
 
+        foreach (SpecialPermissionRequest::query()->where('order_id', $order->id)->where('status', 'rejected')->get() as $rejected) {
+            $problems['special:'.$rejected->id] = [
+                'label' => $this->t('special_permission'),
+                'description' => $this->t('special_rejected_problem').($rejected->decision_note ? ': '.$rejected->decision_note : ''),
+                'status' => 'quality_issue',
+                'order' => $order,
+            ];
+        }
+
         return $problems;
     }
 
@@ -1434,10 +1620,13 @@ new class extends Component
         </div>
         <nav wire:poll.15s class="border-t border-slate-100" aria-label="Main">
             <div x-bind:class="menuOpen ? 'flex' : 'hidden md:flex'" class="mx-auto max-w-7xl flex-col gap-1 px-2 py-2 md:flex-row md:overflow-x-auto md:py-0 sm:px-4">
-                @foreach (['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'notifications' => 'notifications', 'maintenance' => 'maintenance', 'calculators' => 'calculators', 'moulds' => 'moulds', 'products' => 'products', 'help' => 'help'] as $tab => $label)
+                @foreach (['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'notifications' => 'notifications', 'maintenance' => 'maintenance', 'calculators' => 'calculators', 'moulds' => 'moulds', 'products' => 'products', 'admin_tasks' => 'admin_tasks', 'help' => 'help'] as $tab => $label)
                     @if ($this->canViewTab($tab))
                     <button wire:click="selectTab('{{ $tab }}')" x-on:click="menuOpen = false" @class(['shrink-0 whitespace-nowrap rounded-md px-4 py-3 text-left text-sm font-semibold transition md:rounded-none md:border-b-2', 'bg-teal-50 text-teal-700 md:border-teal-600 md:bg-transparent' => $activeTab === $tab, 'text-slate-600 hover:text-teal-700 md:border-transparent' => $activeTab !== $tab])>
                         {{ $this->t($label) }}
+                        @if ($tab === 'admin_tasks' && $this->pendingSpecialPermissionCount > 0)
+                            <span class="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-bold text-white">{{ $this->pendingSpecialPermissionCount }}</span>
+                        @endif
                         @if ($tab === 'notifications' && $this->unreadNotificationCount > 0)
                             <span class="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-bold text-white">{{ $this->unreadNotificationCount }}</span>
                         @endif
@@ -1654,6 +1843,41 @@ new class extends Component
                         <li class="text-sm text-slate-500">{{ $this->t('no_notifications') }}</li>
                     @endforelse
                 </ul>
+            </section>
+        @elseif ($activeTab === 'admin_tasks' && $this->isAdmin())
+            <section wire:poll.15s class="space-y-4">
+                <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('admin_tasks') }}</h1>
+                @forelse ($this->specialPermissionRequests as $specialRequest)
+                    <article wire:key="special-request-{{ $specialRequest->id }}" class="rounded-xl border border-orange-300 bg-white p-5 shadow-sm">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h2 class="text-lg font-bold">{{ $this->t('special_permission') }}: {{ $specialRequest->product?->name }}</h2>
+                            <time class="text-xs text-slate-500">{{ $specialRequest->created_at->timezone(config('app.display_timezone'))->format('Y-m-d H:i') }}</time>
+                        </div>
+                        <p class="mt-1 text-sm text-slate-600">
+                            {{ $this->t('requested_by') }}: {{ $specialRequest->requester?->name }}
+                            @if ($specialRequest->order)
+                                · {{ $specialRequest->order->order_number }} · {{ $specialRequest->order->machine?->name }}
+                            @endif
+                        </p>
+                        <p class="mt-3 whitespace-pre-wrap text-sm">{{ $specialRequest->reason }}</p>
+                        @if ($specialRequest->photos->isNotEmpty())
+                            <div class="mt-3 flex flex-wrap gap-2">
+                                @foreach ($specialRequest->photos as $photo)
+                                    <a href="{{ $photo->url() }}" target="_blank" rel="noopener"><img src="{{ $photo->url() }}" alt="{{ $photo->original_name }}" class="h-24 w-24 rounded-md border border-slate-200 object-cover"></a>
+                                @endforeach
+                            </div>
+                        @endif
+                        <label class="mt-4 block text-sm font-semibold">{{ $this->t('decision_note') }}
+                            <input wire:model="decisionNotes.{{ $specialRequest->id }}" type="text" maxlength="500" class="mt-1 w-full rounded-md border-slate-300">
+                        </label>
+                        <div class="mt-3 flex gap-3">
+                            <button wire:click="decideSpecialPermission({{ $specialRequest->id }}, true)" class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700">{{ $this->t('approve') }}</button>
+                            <button wire:click="decideSpecialPermission({{ $specialRequest->id }}, false)" class="rounded-md bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700">{{ $this->t('reject') }}</button>
+                        </div>
+                    </article>
+                @empty
+                    <p class="rounded-xl bg-white p-6 text-sm text-slate-500">{{ $this->t('no_special_requests') }}</p>
+                @endforelse
             </section>
         @elseif ($activeTab === 'maintenance')
             <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1979,6 +2203,11 @@ new class extends Component
                                             @endforeach
                                         </ul>
                                     @endif
+                                    @if ($specialRequestId = data_get($entry, 'meta.special_permission_request_id'))
+                                        @foreach ($this->specialRequestPhotos((int) $specialRequestId) as $photo)
+                                            <a href="{{ $photo->url() }}" target="_blank" rel="noopener" class="mt-2 mr-3 inline-block text-sm font-semibold text-teal-700 underline">📷 {{ $this->t('open_photo') }} {{ $loop->iteration }}</a>
+                                        @endforeach
+                                    @endif
                                     <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                                         <span>{{ $this->t('signed_by') }}: {{ data_get($entry, 'signed_by', $this->t('unknown_signer')) }}</span>
                                         <span>{{ $this->t('current_quantity') }}: {{ data_get($entry, 'current_quantity', $protocolOrder->current_quantity) }}</span>
@@ -2081,6 +2310,9 @@ new class extends Component
                             <option value="good">{{ $this->t('good') }}</option>
                             <option value="warning">{{ $this->t('warning') }}</option>
                             <option value="quality_issue">{{ $this->t('quality_issue') }}</option>
+                            @if ($this->canRequestSpecialPermission())
+                                <option value="special_permission">{{ $this->t('request_special_permission') }}</option>
+                            @endif
                         </select>
                     </label>
                     <label class="text-sm font-semibold">{{ $this->t('current_quantity') }}
@@ -2096,8 +2328,8 @@ new class extends Component
                             </div>
                         </div>
                     @endif
-                    @if ($qualityStatus !== 'good')
-                        <div wire:key="quality-problem-fields-{{ $qualityStatus }}" class="grid gap-4">
+                    @if ($qualityStatus !== 'good' && $qualityStatus !== 'special_permission')
+                        <div wire:key="quality-problem-fields-{{ $qualityStatus }}" class="grid gap-4">-{{ $qualityStatus }}" class="grid gap-4">
                             <label class="text-sm font-semibold">{{ $this->t('problem_type') }}
                                 <select wire:model="qualityProblemType" class="mt-1 w-full rounded-md border-slate-300">
                                     @foreach ($this->qualityProblemTypes() as $problemType)
@@ -2109,6 +2341,20 @@ new class extends Component
                                 <textarea wire:model="qualityProblemNote" rows="3" placeholder="{{ $this->t('problem_reason_placeholder') }}" class="mt-1 w-full rounded-md border-slate-300"></textarea>
                                 @error('qualityProblemNote')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
                             </label>
+                        </div>
+                    @endif
+                    @if ($qualityStatus === 'special_permission' && $this->canRequestSpecialPermission())
+                        <div wire:key="special-permission-fields" class="rounded-md border border-orange-300 bg-orange-50 p-3">
+                            <label class="block text-sm font-semibold">{{ $this->t('special_reason') }}
+                                <textarea wire:model="specialReason" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>
+                                @error('specialReason')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
+                            </label>
+                            <label class="mt-3 block text-sm font-semibold">{{ $this->t('special_photos') }}
+                                <input wire:model="specialPhotos" type="file" multiple accept="image/*" class="mt-1 block w-full text-sm">
+                                @error('specialPhotos.*')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
+                                @error('specialPhotos')<span class="text-xs text-red-600">{{ $message }}</span>@enderror
+                            </label>
+                            <div wire:loading wire:target="specialPhotos" class="mt-1 text-xs text-slate-500">{{ $this->t('uploading') }}</div>
                         </div>
                     @endif
                 </div>

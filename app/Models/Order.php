@@ -289,6 +289,17 @@ class Order extends Model
         return $this->hasMany(OrderDailyCount::class);
     }
 
+    public function specialPermissionRequests(): HasMany
+    {
+        return $this->hasMany(SpecialPermissionRequest::class);
+    }
+
+    /** A pending or rejected (not yet resolved) special permission request keeps the order stopped. */
+    public function hasPendingSpecialPermission(): bool
+    {
+        return $this->specialPermissionRequests()->whereIn('status', ['pending', 'rejected'])->exists();
+    }
+
     public function machine(): BelongsTo
     {
         return $this->belongsTo(Machine::class);

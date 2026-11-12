@@ -4,17 +4,22 @@ use App\Enums\Role;
 use App\Models\Machine;
 use App\Models\Mould;
 use App\Models\Order;
+use App\Models\Photo;
 use App\Models\Product;
+use App\Models\SpecialPermissionRequest;
 use App\Models\User;
 use App\Notifications\OrderWorkflowNotification;
+use App\Notifications\SpecialPermissionNotification;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 ?>
 
 <div class="min-h-screen bg-slate-100 text-slate-700">
@@ -78,11 +83,14 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
         </div>
         <nav wire:poll.15s class="border-t border-slate-100" aria-label="Main">
             <div x-bind:class="menuOpen ? 'flex' : 'hidden md:flex'" class="mx-auto max-w-7xl flex-col gap-1 px-2 py-2 md:flex-row md:overflow-x-auto md:py-0 sm:px-4">
-                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = ['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'notifications' => 'notifications', 'maintenance' => 'maintenance', 'calculators' => 'calculators', 'moulds' => 'moulds', 'products' => 'products', 'help' => 'help']; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $tab => $label): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = ['machines' => 'machines', 'tasks' => 'tasks', 'orders' => 'orders', 'notifications' => 'notifications', 'maintenance' => 'maintenance', 'calculators' => 'calculators', 'moulds' => 'moulds', 'products' => 'products', 'admin_tasks' => 'admin_tasks', 'help' => 'help']; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $tab => $label): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
                     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canViewTab($tab)): ?>
                     <button wire:click="selectTab('<?php echo e($tab); ?>')" x-on:click="menuOpen = false" class="<?php echo \Illuminate\Support\Arr::toCssClasses(['shrink-0 whitespace-nowrap rounded-md px-4 py-3 text-left text-sm font-semibold transition md:rounded-none md:border-b-2', 'bg-teal-50 text-teal-700 md:border-teal-600 md:bg-transparent' => $activeTab === $tab, 'text-slate-600 hover:text-teal-700 md:border-transparent' => $activeTab !== $tab]); ?>">
                         <?php echo e($this->t($label)); ?>
 
+                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($tab === 'admin_tasks' && $this->pendingSpecialPermissionCount > 0): ?>
+                            <span class="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-bold text-white"><?php echo e($this->pendingSpecialPermissionCount); ?></span>
+                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                         <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($tab === 'notifications' && $this->unreadNotificationCount > 0): ?>
                             <span class="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-bold text-white"><?php echo e($this->unreadNotificationCount); ?></span>
                         <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
@@ -303,6 +311,44 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                         <li class="text-sm text-slate-500"><?php echo e($this->t('no_notifications')); ?></li>
                     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                 </ul>
+            </section>
+        <?php elseif($activeTab === 'admin_tasks' && $this->isAdmin()): ?>
+            <section wire:poll.15s class="space-y-4">
+                <h1 class="text-2xl font-bold text-slate-900"><?php echo e($this->t('admin_tasks')); ?></h1>
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $this->specialPermissionRequests; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $specialRequest): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                    <article <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'special-request-'.e($specialRequest->id).''; ?>wire:key="special-request-<?php echo e($specialRequest->id); ?>" class="rounded-xl border border-orange-300 bg-white p-5 shadow-sm">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h2 class="text-lg font-bold"><?php echo e($this->t('special_permission')); ?>: <?php echo e($specialRequest->product?->name); ?></h2>
+                            <time class="text-xs text-slate-500"><?php echo e($specialRequest->created_at->timezone(config('app.display_timezone'))->format('Y-m-d H:i')); ?></time>
+                        </div>
+                        <p class="mt-1 text-sm text-slate-600">
+                            <?php echo e($this->t('requested_by')); ?>: <?php echo e($specialRequest->requester?->name); ?>
+
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($specialRequest->order): ?>
+                                · <?php echo e($specialRequest->order->order_number); ?> · <?php echo e($specialRequest->order->machine?->name); ?>
+
+                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                        </p>
+                        <p class="mt-3 whitespace-pre-wrap text-sm"><?php echo e($specialRequest->reason); ?></p>
+                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($specialRequest->photos->isNotEmpty()): ?>
+                            <div class="mt-3 flex flex-wrap gap-2">
+                                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = $specialRequest->photos; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $photo): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                                    <a href="<?php echo e($photo->url()); ?>" target="_blank" rel="noopener"><img src="<?php echo e($photo->url()); ?>" alt="<?php echo e($photo->original_name); ?>" class="h-24 w-24 rounded-md border border-slate-200 object-cover"></a>
+                                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                            </div>
+                        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                        <label class="mt-4 block text-sm font-semibold"><?php echo e($this->t('decision_note')); ?>
+
+                            <input wire:model="decisionNotes.<?php echo e($specialRequest->id); ?>" type="text" maxlength="500" class="mt-1 w-full rounded-md border-slate-300">
+                        </label>
+                        <div class="mt-3 flex gap-3">
+                            <button wire:click="decideSpecialPermission(<?php echo e($specialRequest->id); ?>, true)" class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"><?php echo e($this->t('approve')); ?></button>
+                            <button wire:click="decideSpecialPermission(<?php echo e($specialRequest->id); ?>, false)" class="rounded-md bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700"><?php echo e($this->t('reject')); ?></button>
+                        </div>
+                    </article>
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                    <p class="rounded-xl bg-white p-6 text-sm text-slate-500"><?php echo e($this->t('no_special_requests')); ?></p>
+                <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
             </section>
         <?php elseif($activeTab === 'maintenance'): ?>
             <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -637,6 +683,11 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                                             <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
                                         </ul>
                                     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($specialRequestId = data_get($entry, 'meta.special_permission_request_id')): ?>
+                                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = $this->specialRequestPhotos((int) $specialRequestId); $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $photo): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+                                            <a href="<?php echo e($photo->url()); ?>" target="_blank" rel="noopener" class="mt-2 mr-3 inline-block text-sm font-semibold text-teal-700 underline">📷 <?php echo e($this->t('open_photo')); ?> <?php echo e($loop->iteration); ?></a>
+                                        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+                                    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                                     <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                                         <span><?php echo e($this->t('signed_by')); ?>: <?php echo e(data_get($entry, 'signed_by', $this->t('unknown_signer'))); ?></span>
                                         <span><?php echo e($this->t('current_quantity')); ?>: <?php echo e(data_get($entry, 'current_quantity', $protocolOrder->current_quantity)); ?></span>
@@ -808,6 +859,9 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                             <option value="good"><?php echo e($this->t('good')); ?></option>
                             <option value="warning"><?php echo e($this->t('warning')); ?></option>
                             <option value="quality_issue"><?php echo e($this->t('quality_issue')); ?></option>
+                            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($this->canRequestSpecialPermission()): ?>
+                                <option value="special_permission"><?php echo e($this->t('request_special_permission')); ?></option>
+                            <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                         </select>
                     </label>
                     <label class="text-sm font-semibold"><?php echo e($this->t('current_quantity')); ?>
@@ -824,8 +878,8 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                             </div>
                         </div>
                     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
-                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($qualityStatus !== 'good'): ?>
-                        <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'quality-problem-fields-'.e($qualityStatus).''; ?>wire:key="quality-problem-fields-<?php echo e($qualityStatus); ?>" class="grid gap-4">
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($qualityStatus !== 'good' && $qualityStatus !== 'special_permission'): ?>
+                        <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'quality-problem-fields-'.e($qualityStatus).''; ?>wire:key="quality-problem-fields-<?php echo e($qualityStatus); ?>" class="grid gap-4">-<?php echo e($qualityStatus); ?>" class="grid gap-4">
                             <label class="text-sm font-semibold"><?php echo e($this->t('problem_type')); ?>
 
                                 <select wire:model="qualityProblemType" class="mt-1 w-full rounded-md border-slate-300">
@@ -846,6 +900,43 @@ if (isset($__messageOriginal)) { $message = $__messageOriginal; }
 endif;
 unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                             </label>
+                        </div>
+                    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($qualityStatus === 'special_permission' && $this->canRequestSpecialPermission()): ?>
+                        <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'special-permission-fields'; ?>wire:key="special-permission-fields" class="rounded-md border border-orange-300 bg-orange-50 p-3">
+                            <label class="block text-sm font-semibold"><?php echo e($this->t('special_reason')); ?>
+
+                                <textarea wire:model="specialReason" rows="3" class="mt-1 w-full rounded-md border-slate-300"></textarea>
+                                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__errorArgs = ['specialReason'];
+$__bag = $errors->getBag($__errorArgs[1] ?? 'default');
+if ($__bag->has($__errorArgs[0])) :
+if (isset($message)) { $__messageOriginal = $message; }
+$message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600"><?php echo e($message); ?></span><?php unset($message);
+if (isset($__messageOriginal)) { $message = $__messageOriginal; }
+endif;
+unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                            </label>
+                            <label class="mt-3 block text-sm font-semibold"><?php echo e($this->t('special_photos')); ?>
+
+                                <input wire:model="specialPhotos" type="file" multiple accept="image/*" class="mt-1 block w-full text-sm">
+                                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__errorArgs = ['specialPhotos.*'];
+$__bag = $errors->getBag($__errorArgs[1] ?? 'default');
+if ($__bag->has($__errorArgs[0])) :
+if (isset($message)) { $__messageOriginal = $message; }
+$message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600"><?php echo e($message); ?></span><?php unset($message);
+if (isset($__messageOriginal)) { $message = $__messageOriginal; }
+endif;
+unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__errorArgs = ['specialPhotos'];
+$__bag = $errors->getBag($__errorArgs[1] ?? 'default');
+if ($__bag->has($__errorArgs[0])) :
+if (isset($message)) { $__messageOriginal = $message; }
+$message = $__bag->first($__errorArgs[0]); ?><span class="text-xs text-red-600"><?php echo e($message); ?></span><?php unset($message);
+if (isset($__messageOriginal)) { $message = $__messageOriginal; }
+endif;
+unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                            </label>
+                            <div wire:loading wire:target="specialPhotos" class="mt-1 text-xs text-slate-500"><?php echo e($this->t('uploading')); ?></div>
                         </div>
                     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                 </div>

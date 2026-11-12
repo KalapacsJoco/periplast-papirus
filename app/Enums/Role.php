@@ -32,6 +32,8 @@ enum Role: string
 
     public const APPROVE_QUALITY = 'quality.approve';
 
+    public const REQUEST_SPECIAL_PERMISSION = 'quality.special_permission';
+
     public const CHECK_COLOR = 'quality.check_color';
 
     public const ENTER_MEASURED_DATA = 'order.measure';
@@ -43,7 +45,7 @@ enum Role: string
             self::Admin => [self::PERMISSION_ALL],
             self::Programmer => [self::ACTIVATE_ORDER, self::PAUSE_ORDER, self::INTERRUPT_ORDER],
             self::Operator => [self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHANGE_CAVITIES, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
-            self::QualityManager => [self::CHECK_QUALITY, self::APPROVE_QUALITY, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING],
+            self::QualityManager => [self::CHECK_QUALITY, self::APPROVE_QUALITY, self::REQUEST_SPECIAL_PERMISSION, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING],
             self::Coordinator => [self::ASSIGN_ORDER, self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHANGE_CAVITIES, self::CHECK_QUALITY, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
         };
     }
