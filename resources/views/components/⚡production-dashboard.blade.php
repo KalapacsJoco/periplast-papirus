@@ -254,7 +254,7 @@ new class extends Component
     public function machines()
     {
         return Machine::query()
-            ->with(['orders' => fn ($query) => $this->boardOrders($query, ['mould:id,name,number,cavity_count,active_cavityes,status,problem_description', 'product:id,name,code'])])
+            ->with(['orders' => fn ($query) => $this->boardOrders($query, ['mould:id,name,number,cavity_count,active_cavityes,status,problem_description', 'product:id,name,code', 'specialPermissionRequests'])])
             ->orderBy('name')
             ->get();
     }
@@ -304,6 +304,7 @@ new class extends Component
                 ! in_array($order->mould?->status, ['active', 'warning'], true)
                 || $this->qualityStatus($order) === 'quality_issue'
                 || $order->hasPendingSpecialPermission()
+                || $order->specialPermissionPauseCauses() !== []
             ))
         ) {
             return 'stopped';
@@ -495,7 +496,7 @@ new class extends Component
         return Machine::query()
             ->with([
                 'moulds:id,name,number',
-                'orders' => fn ($query) => $this->boardOrders($query, ['mould', 'product.material', 'product.color', 'product.additives']),
+                'orders' => fn ($query) => $this->boardOrders($query, ['mould', 'product.material', 'product.color', 'product.additives', 'specialPermissionRequests']),
             ])
             ->find($machineId);
     }
@@ -652,13 +653,14 @@ new class extends Component
         ];
 
         if ($validated['orderStatus'] === 'in_progress') {
+            abort_if($order->specialPermissionBlocksRestart(), 422, $this->t('production_blocked_by_issue'));
             abort_unless($order->canRunProduction(), 422, $this->t('production_blocked_by_issue'));
             $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
             $protocol['automatic_pause'] = null;
             $updates['production_protocol'] = $protocol;
         }
 
-        if ($validated['orderStatus'] === 'paused') {
+        if ($validated['orderStatus'] === 'paused' && $order->specialPermissionPauseCauses() === []) {
             $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
             $protocol['automatic_pause'] = null;
             $updates['production_protocol'] = $protocol;
@@ -692,6 +694,7 @@ new class extends Component
         $this->ensurePermission(Role::ACTIVATE_ORDER);
         $order = Order::findOrFail($orderId);
         abort_unless(in_array($order->status, ['waiting', 'paused', 'interrupted'], true), 422);
+        abort_if($order->specialPermissionBlocksRestart(), 422, $this->t('production_blocked_by_issue'));
         abort_unless($order->canBeActivated(), 422, $this->t('order_activation_blocked_broken_machine'));
         $isReactivation = $order->status === 'interrupted';
         $protocol = is_array($order->production_protocol) ? $order->production_protocol : [];
@@ -992,6 +995,14 @@ new class extends Component
             $protocol = $order->production_protocol ?? [];
             $issueId = $request->quality_issue_id;
 
+            if ($approve && $order->status === 'paused') {
+                $automaticPause = is_array($protocol['automatic_pause'] ?? null) ? $protocol['automatic_pause'] : [];
+                $causes = is_array($automaticPause['causes'] ?? null) ? $automaticPause['causes'] : [];
+                $automaticPause['causes'] = array_values(array_unique([...$causes, 'special:'.$request->id]));
+                $protocol['automatic_pause'] = $automaticPause;
+                $order->update(['production_protocol' => $protocol]);
+            }
+
             if ($approve && $issueId !== null) {
                 $issues = collect($protocol['quality_issues'] ?? [])->map(function (array $issue) use ($issueId): array {
                     if (($issue['id'] ?? null) === $issueId) {
@@ -1005,7 +1016,7 @@ new class extends Component
                 })->all();
                 $stillOpen = collect($issues)->contains(fn (array $issue): bool => ($issue['status'] ?? 'open') === 'open');
                 $protocol['quality_issues'] = $issues;
-                $protocol['quality_status'] = $stillOpen ? 'quality_issue' : 'warning';
+                $protocol['quality_status'] = $stillOpen ? 'quality_issue' : 'good';
                 $order->update(['production_protocol' => $protocol]);
             }
 
@@ -1021,7 +1032,6 @@ new class extends Component
                 if ($issueId !== null) {
                     $order->fresh()->resolveIssuePause('quality:'.$issueId);
                 }
-                $order->fresh()->resolveIssuePause('special:'.$request->id);
             }
         }
 
@@ -1034,8 +1044,45 @@ new class extends Component
             ->where(fn ($query) => $query->whereIn('role', $roles)->orWhere('id', $request->requested_by))
             ->each(fn (User $recipient) => $recipient->notify($notification));
 
-        unset($this->specialPermissionRequests, $this->pendingSpecialPermissionCount, $this->machines);
+        unset($this->specialPermissionRequests, $this->pendingSpecialPermissionCount, $this->machines, $this->detailMachine, $this->expandedMachine);
         $this->flashMessage = $this->t($approve ? 'special_approved_flash' : 'special_rejected_flash');
+    }
+
+    public function startSpecialPermissionProduction(int $orderId): void
+    {
+        abort_unless(in_array(Auth::user()?->role, [Role::Coordinator, Role::Operator], true), 403);
+
+        $order = Order::query()->with(['machine.orders', 'mould'])->findOrFail($orderId);
+        $specialCauses = $order->specialPermissionPauseCauses();
+        $causes = data_get($order->production_protocol, 'automatic_pause.causes', []);
+        $approvedCauses = $order->specialPermissionRequests()
+            ->where('status', 'approved')
+            ->get()
+            ->map(fn (SpecialPermissionRequest $request): string => 'special:'.$request->id)
+            ->all();
+
+        abort_unless(
+            $order->machine?->productionMetrics()->currentOrder()?->is($order)
+            && $specialCauses !== []
+            && is_array($causes)
+            && count($causes) === count($specialCauses)
+            && array_diff($specialCauses, $approvedCauses) === []
+            && ! $order->hasPendingSpecialPermission()
+            && $order->canRunProduction(allowMachineSetup: true),
+            422,
+            $this->t('production_blocked_by_issue')
+        );
+
+        if ($order->machine->status === 'setup') {
+            $order->machine->update(['status' => 'active', 'problem_description' => null]);
+        }
+
+        foreach ($specialCauses as $cause) {
+            $order->fresh()->resolveIssuePause($cause);
+        }
+
+        $this->flashMessage = $this->t('special_production_started');
+        unset($this->machines, $this->detailMachine, $this->expandedMachine, $this->waitingOrders, $this->ordersForViewing, $this->ordersForViewingByStatus);
     }
 
     #[Computed]
@@ -1258,7 +1305,7 @@ new class extends Component
         return match ($status) {
             'active', 'in_progress', 'good' => 'bg-emerald-100 text-emerald-800',
             'warning' => 'bg-amber-100 text-amber-800',
-            'broken', 'needs_repair', 'quality_issue', 'interrupted' => 'bg-red-100 text-red-800',
+            'stopped', 'broken', 'needs_repair', 'quality_issue', 'interrupted' => 'bg-red-100 text-red-800',
             'under_repair', 'setup' => 'bg-blue-100 text-blue-800',
             default => 'bg-slate-200 text-slate-700',
         };
@@ -1678,6 +1725,8 @@ new class extends Component
                             @php($nextOrder = $metrics->nextActivatedOrder())
                             @php($state = $this->machineState($machine))
                             @php($requestedStatus = $runningOrder?->requested_status)
+                            @php($hasSpecialPermission = $runningOrder?->hasApprovedSpecialPermission() ?? false)
+                            @php($shownMachineStatus = $runningOrder && ($runningOrder->hasPendingSpecialPermission() || $runningOrder->specialPermissionPauseCauses() !== []) ? 'stopped' : $machine->status)
                             <tbody wire:key="machine-{{ $machine->id }}">
                                 <tr @class([
                                     'group cursor-pointer align-middle text-slate-800 transition-colors focus:outline-none [&>td:first-child]:border-l-4 [&>td]:transition-colors [&:hover>td]:border-teal-500 [&:hover>td]:bg-teal-100 [&:hover>td:first-child]:border-l-teal-600 [&:focus-visible>td]:border-teal-500 [&:focus-visible>td]:bg-teal-100',
@@ -1688,9 +1737,10 @@ new class extends Component
                                     '[&>td:first-child]:border-l-slate-300' => $state === 'idle',
                                     '[&>td]:bg-amber-100 [&>td]:border-amber-300 [&>td:first-child]:border-l-amber-600' => $requestedStatus === 'completed',
                                     '[&>td]:bg-rose-100 [&>td]:border-rose-300 [&>td:first-child]:border-l-rose-600' => $requestedStatus === 'interrupted',
-                                    '[&>td]:!border-y-2 [&>td]:!border-red-600 [&>td:first-child]:!border-l-red-600 [&>td:last-child]:!border-r-2' => $runningOrder && $runningOrder->qm_approved_at === null,
+                                    '[&>td]:!border-y-2 [&>td]:!border-red-600 [&>td:first-child]:!border-l-red-600 [&>td:last-child]:!border-r-2' => $runningOrder && $runningOrder->qm_approved_at === null && ! $hasSpecialPermission,
+                                    '[&>td]:!border-y-2 [&>td]:!border-yellow-500 [&>td:first-child]:!border-l-yellow-500 [&>td:last-child]:!border-r-2' => $hasSpecialPermission,
                                 ]) wire:click="toggleMachineRow({{ $machine->id }})" wire:keydown.enter="toggleMachineRow({{ $machine->id }})" role="button" tabindex="0" aria-expanded="{{ $expandedMachineId === $machine->id ? 'true' : 'false' }}" title="{{ $runningOrder && $runningOrder->qm_approved_at === null ? $this->t('quality_not_approved') : $this->t('open_details') }}">
-                                    <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->name }}</td>
+                                    <td class="rounded-l-md border-y border-l border-slate-200 bg-white px-2 py-2 font-bold text-slate-900 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->name }} @if ($hasSpecialPermission)<span class="block text-yellow-800" title="{{ $this->t('special_permission_active') }}">{{ $this->t('special_permission') }}</span>@endif</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">{{ $machine->type }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($runningOrder && $this->qualityCheckOverdue($runningOrder))<span class="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-black text-white" title="{{ $this->t('quality_check_overdue') }}" aria-label="{{ $this->t('quality_check_overdue') }}">!</span>@endif{{ $order?->product?->name ?? '-' }}</td>
                                     <td class="border-y border-slate-200 bg-white px-2 py-2 group-hover:border-teal-500 group-hover:bg-teal-50">@if ($order?->measured_gross_weight !== null)<span @class(['font-bold text-red-600' => $order->measuredDeviates('gross_weight')]) title="{{ $this->t('theoretical') }}: {{ $order?->gross_weight ?? '-' }}">{{ $order->measured_gross_weight }}</span>@else<span class="text-slate-400" title="{{ $this->t('theoretical') }}">{{ $order?->gross_weight ?? '-' }}</span>@endif</td>
@@ -1756,6 +1806,7 @@ new class extends Component
                         @php($order = $runningOrder ?? $metrics->lastClosedOrder())
                         @php($state = $this->machineState($machine))
                         @php($requestedStatus = $runningOrder?->requested_status)
+                        @php($hasSpecialPermission = $runningOrder?->hasApprovedSpecialPermission() ?? false)
                         <article wire:key="machine-card-{{ $machine->id }}" wire:click="openMachineDetail({{ $machine->id }})" wire:keydown.enter="openMachineDetail({{ $machine->id }})" role="button" tabindex="0" title="{{ $this->t('open_details') }}" @class([
                             'cursor-pointer overflow-hidden rounded-xl border shadow-sm transition hover:border-teal-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-teal-600',
                             'border-emerald-300 bg-emerald-50' => $state === 'running',
@@ -1765,20 +1816,22 @@ new class extends Component
                             'border-slate-200 bg-white' => $state === 'idle',
                             'border-amber-400 bg-amber-100' => $requestedStatus === 'completed',
                             'border-rose-400 bg-rose-100' => $requestedStatus === 'interrupted',
-                            'border-2 !border-red-600' => $runningOrder && $runningOrder->qm_approved_at === null,
+                            'border-2 !border-red-600' => $runningOrder && $runningOrder->qm_approved_at === null && ! $hasSpecialPermission,
+                            'border-2 !border-yellow-500' => $hasSpecialPermission,
                         ])>
                             <div class="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
                                 <div>
                                     <h2 class="text-lg font-bold text-slate-900">{{ $machine->name }}</h2>
                                     <p class="text-sm text-slate-500">{{ $machine->type }}</p>
+                                    @if ($hasSpecialPermission)<p class="text-xs font-bold text-yellow-800">{{ $this->t('special_permission_active') }}</p>@endif
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($machine->status)])>{{ $this->statusLabel($machine->status) }}</span>
+                                    <span @class(['rounded-full px-2.5 py-1 text-xs font-bold', $this->statusClass($shownMachineStatus)])>{{ $this->statusLabel($shownMachineStatus) }}</span>
                                 </div>
                             </div>
                             <div class="p-5">
                                 <dl class="grid grid-cols-2 gap-3 text-sm">
-                                    <div><dt class="text-slate-500">{{ $this->t('machine_status_label') }}</dt><dd class="mt-0.5"><span @class(['inline-block rounded-full px-2.5 py-0.5 text-xs font-bold', $this->statusClass($machine->status)])>{{ $machine->status === 'active' ? $this->t('good') : $this->statusLabel($machine->status) }}</span>@if ($machine->problem_description && $machine->status !== 'active')<p class="mt-1 break-words text-xs text-slate-700">{{ $machine->problem_description }}</p>@endif</dd></div>
+                                    <div><dt class="text-slate-500">{{ $this->t('machine_status_label') }}</dt><dd class="mt-0.5"><span @class(['inline-block rounded-full px-2.5 py-0.5 text-xs font-bold', $this->statusClass($shownMachineStatus)])>{{ $shownMachineStatus === 'active' ? $this->t('good') : $this->statusLabel($shownMachineStatus) }}</span>@if ($machine->problem_description && $machine->status !== 'active')<p class="mt-1 break-words text-xs text-slate-700">{{ $machine->problem_description }}</p>@endif</dd></div>
                                     <div><dt class="text-slate-500">{{ $this->t('mould_status_label') }}</dt><dd class="mt-0.5">@if ($order?->mould)<span @class(['inline-block rounded-full px-2.5 py-0.5 text-xs font-bold', $this->statusClass($order->mould->status)])>{{ $order->mould->status === 'active' ? $this->t('good') : $this->statusLabel($order->mould->status) }}</span>@if ($order->mould->problem_description && $order->mould->status !== 'active')<p class="mt-1 break-words text-xs text-slate-700">{{ $order->mould->problem_description }}</p>@endif @else<span class="font-semibold">-</span>@endif</dd></div>
                                 </dl>
                                 @if ($order)

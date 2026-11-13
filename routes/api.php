@@ -169,6 +169,9 @@ Route::post('/orders/{id}/status', function (Request $request, $id) {
     $order = Order::findOrFail($id);
     $previousStatus = $order->status;
     $status = $validated['status'];
+    if (in_array($status, ['in_progress', 'waiting'], true) && $order->specialPermissionBlocksRestart()) {
+        throw ValidationException::withMessages(['status' => __('dashboard.production_blocked_by_issue')]);
+    }
     $pauseDescription = in_array($status, ['paused', 'interrupted'], true)
         ? ($validated['pause_description'] ?? null)
         : null;

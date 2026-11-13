@@ -3,14 +3,18 @@
 @php($detailNextOrder = $detailMetrics->nextActivatedOrder())
 @php($detailNextOrder = $detailNextOrder?->is($detailOrder) ? null : $detailNextOrder)
 @php($detailMould = ($detailOrder ?? $detailMetrics->lastClosedOrder())?->mould)
+@php($detailStatus = $detailMetrics->currentOrder()?->is($detailOrder) && ($detailOrder->hasPendingSpecialPermission() || $detailOrder->specialPermissionPauseCauses() !== []) ? 'stopped' : $detail->status)
 <div @class(['space-y-4'=> ! ($inline ?? false), 'grid gap-4 lg:grid-cols-5' => ($inline ?? false)])>
     <div @class(['grid gap-3 lg:grid-cols-2'=> ! ($inline ?? false), 'space-y-3 lg:col-span-2' => ($inline ?? false)])>
         <section class="rounded-lg border border-slate-200 px-3 py-2">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <h3 class="text-sm font-bold text-slate-900">{{ $this->t('machine_details') }}</h3>
-                <span @class(['rounded-full px-2 py-0.5 text-xs font-bold', $this->statusClass($detail->status)])>{{
-                    $this->statusLabel($detail->status) }}</span>
+                <span @class(['rounded-full px-2 py-0.5 text-xs font-bold', $this->statusClass($detailStatus)])>{{
+                    $this->statusLabel($detailStatus) }}</span>
             </div>
+            @if ($detailMetrics->currentOrder()?->is($detailOrder) && $detailOrder->hasApprovedSpecialPermission() && $detailOrder->specialPermissionPauseCauses() !== [] && in_array(auth()->user()?->role, [\App\Enums\Role::Coordinator, \App\Enums\Role::Operator], true))
+                <button type="button" wire:click="startSpecialPermissionProduction({{ $detailOrder->id }})" class="mt-2 rounded-md bg-teal-700 px-3 py-2 text-sm font-bold text-white hover:bg-teal-800">{{ $this->t('start_special_production') }}</button>
+            @endif
             <dl class="mt-1.5 grid grid-cols-2 gap-2 text-xs">
                 <div>
                     <dt class="text-slate-500">{{ $this->t('screw_diameter') }}</dt>

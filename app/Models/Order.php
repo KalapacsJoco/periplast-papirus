@@ -168,7 +168,7 @@ class Order extends Model
         return $this->refresh();
     }
 
-    public function canRunProduction(): bool
+    public function canRunProduction(bool $allowMachineSetup = false): bool
     {
         $protocol = is_array($this->production_protocol) ? $this->production_protocol : [];
         $qualityIssues = $protocol['quality_issues'] ?? [];
@@ -188,7 +188,7 @@ class Order extends Model
         }
 
         return in_array($qualityStatus, ['good', 'warning'], true)
-            && in_array($this->machine?->status, ['active', 'warning'], true)
+            && in_array($this->machine?->status, $allowMachineSetup ? ['active', 'warning', 'setup'] : ['active', 'warning'], true)
             && in_array($this->mould?->status, ['active', 'warning'], true);
     }
 
@@ -297,7 +297,34 @@ class Order extends Model
     /** A pending or rejected (not yet resolved) special permission request keeps the order stopped. */
     public function hasPendingSpecialPermission(): bool
     {
+        if ($this->relationLoaded('specialPermissionRequests')) {
+            return $this->specialPermissionRequests->contains(fn (SpecialPermissionRequest $request): bool => in_array($request->status, ['pending', 'rejected'], true));
+        }
+
         return $this->specialPermissionRequests()->whereIn('status', ['pending', 'rejected'])->exists();
+    }
+
+    public function hasApprovedSpecialPermission(): bool
+    {
+        if ($this->relationLoaded('specialPermissionRequests')) {
+            return $this->specialPermissionRequests->contains('status', 'approved');
+        }
+
+        return $this->specialPermissionRequests()->where('status', 'approved')->exists();
+    }
+
+    public function specialPermissionPauseCauses(): array
+    {
+        $causes = data_get($this->production_protocol, 'automatic_pause.causes', []);
+
+        return $this->status === 'paused' && is_array($causes)
+            ? array_values(array_filter($causes, fn ($cause): bool => is_string($cause) && str_starts_with($cause, 'special:')))
+            : [];
+    }
+
+    public function specialPermissionBlocksRestart(): bool
+    {
+        return $this->hasPendingSpecialPermission() || $this->specialPermissionPauseCauses() !== [];
     }
 
     public function machine(): BelongsTo
