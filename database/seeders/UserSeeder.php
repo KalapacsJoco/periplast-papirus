@@ -18,6 +18,8 @@ class UserSeeder extends Seeder
         ['Derzsi Karoly', 'derzsi@periplast.ro', Role::Operator],
         ['Quality Manager', 'qm@periplast.ro', Role::QualityManager],
         ['Coordinator', 'coordinator@periplast.ro', Role::Coordinator],
+        ['Repair', 'repair@periplast.ro', Role::Reparation],
+        ['Maintenance', 'maintenance@periplast.ro', Role::Maintenance],
     ];
 
     public function run(): void
