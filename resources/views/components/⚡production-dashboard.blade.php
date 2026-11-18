@@ -10,9 +10,12 @@ use App\Models\Product;
 use App\Models\SpecialPermissionRequest;
 use App\Models\User;
 use App\Notifications\OrderWorkflowNotification;
+use App\Notifications\MouldRepairNotification;
 use App\Notifications\SpecialPermissionNotification;
+use App\Support\MouldRepairWorkflow;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
@@ -41,6 +44,9 @@ new class extends Component
     public ?int $detailMachineId = null;
 
     public ?int $expandedMachineId = null;
+
+    #[Locked]
+    public ?int $mouldRepairLogId = null;
 
     public ?int $orderId = null;
 
@@ -117,6 +123,22 @@ new class extends Component
     public string $flashMessage = '';
 
     public string $locale = 'hu';
+
+    public array $repairDescriptions = [];
+
+    public array $repairPriorities = [];
+
+    public array $repairRoles = [];
+
+    public array $repairWorkDescriptions = [];
+
+    public array $repairHours = [];
+
+    public array $repairMinutes = [];
+
+    public array $repairTestNotes = [];
+
+    public array $repairReopenRoles = [];
 
     #[Locked]
     public string $tabId = '';
@@ -344,6 +366,125 @@ new class extends Component
             ->with(['material:id,name,code', 'color:id,name,code', 'additives:id,name,code', 'moulds:id,name,number'])
             ->orderBy('name')
             ->get();
+    }
+
+    #[Computed]
+    public function repairMoulds()
+    {
+        return Mould::query()
+            ->where(fn ($query) => $query->whereIn('status', ['warning', 'needs_repair', 'under_repair'])->orWhereHas('repairRequests'))
+            ->with($this->repairHistoryRelations())
+            ->orderBy('name')
+            ->get();
+    }
+
+    private function repairHistoryRelations(): array
+    {
+        return ['repairRequests' => fn ($query) => $query->with(['requester', 'attempts.repairer', 'attempts.tester'])->orderBy('priority')->orderByDesc('id')];
+    }
+
+    #[Computed]
+    public function mouldRepairLog(): ?Mould
+    {
+        return $this->mouldRepairLogId === null
+            ? null
+            : Mould::query()->with($this->repairHistoryRelations())->find($this->mouldRepairLogId);
+    }
+
+    public function openMouldRepairLog(int $mouldId): void
+    {
+        $this->ensureAuthenticated();
+        $this->mouldRepairLogId = Mould::query()->findOrFail($mouldId)->id;
+        unset($this->mouldRepairLog);
+    }
+
+    public function closeMouldRepairLog(): void
+    {
+        $this->mouldRepairLogId = null;
+        unset($this->mouldRepairLog);
+    }
+
+    public function createMouldRepair(int $mouldId): void
+    {
+        $this->ensureAuthenticated();
+        $validated = $this->validate([
+            "repairDescriptions.$mouldId" => ['required', 'string', 'max:2000'],
+            "repairPriorities.$mouldId" => ['required', 'integer', 'between:1,5'],
+            "repairRoles.$mouldId" => ['required', Rule::in([Role::Reparation->value, Role::Maintenance->value])],
+        ]);
+        app(MouldRepairWorkflow::class)->create(
+            $mouldId,
+            Auth::user(),
+            $validated['repairDescriptions'][$mouldId],
+            (int) $validated['repairPriorities'][$mouldId],
+            Role::from($validated['repairRoles'][$mouldId]),
+        );
+        unset($this->repairDescriptions[$mouldId], $this->repairPriorities[$mouldId], $this->repairRoles[$mouldId], $this->repairMoulds, $this->machines);
+        $this->flashMessage = $this->t('repair_saved');
+    }
+
+    public function setMouldRepairWorkStatus(int $requestId, string $status): void
+    {
+        $this->ensureAuthenticated();
+        app(MouldRepairWorkflow::class)->setWorkStatus($requestId, Auth::user(), $status);
+        unset($this->repairMoulds);
+        $this->flashMessage = $this->t('repair_saved');
+    }
+
+    public function finishMouldRepair(int $requestId): void
+    {
+        $this->ensureAuthenticated();
+        $validated = $this->validate([
+            "repairWorkDescriptions.$requestId" => ['required', 'string', 'max:2000'],
+            "repairHours.$requestId" => ['required', 'integer', 'between:0,10000'],
+            "repairMinutes.$requestId" => ['required', 'integer', 'between:0,59'],
+        ]);
+        $minutes = (int) $validated['repairHours'][$requestId] * 60 + (int) $validated['repairMinutes'][$requestId];
+        if ($minutes < 1) {
+            $this->addError("repairMinutes.$requestId", $this->t('repair_duration_required'));
+
+            return;
+        }
+        app(MouldRepairWorkflow::class)->finish($requestId, Auth::user(), $validated['repairWorkDescriptions'][$requestId], $minutes);
+        unset($this->repairWorkDescriptions[$requestId], $this->repairHours[$requestId], $this->repairMinutes[$requestId], $this->repairMoulds);
+        $this->flashMessage = $this->t('repair_saved');
+    }
+
+    public function testMouldRepair(int $requestId, bool $passed): void
+    {
+        $this->ensureAuthenticated();
+        $validated = $this->validate([
+            "repairTestNotes.$requestId" => [$passed ? 'nullable' : 'required', 'string', 'max:2000'],
+        ]);
+        app(MouldRepairWorkflow::class)->test($requestId, Auth::user(), $passed, $validated['repairTestNotes'][$requestId] ?? null);
+        unset($this->repairTestNotes[$requestId], $this->repairMoulds, $this->machines);
+        $this->flashMessage = $this->t('repair_saved');
+    }
+
+    public function reopenMouldRepair(int $requestId): void
+    {
+        $this->ensureAuthenticated();
+        $validated = $this->validate([
+            "repairReopenRoles.$requestId" => ['required', Rule::in([Role::Reparation->value, Role::Maintenance->value])],
+        ]);
+        app(MouldRepairWorkflow::class)->reopen($requestId, Auth::user(), Role::from($validated['repairReopenRoles'][$requestId]));
+        unset($this->repairReopenRoles[$requestId], $this->repairMoulds);
+        $this->flashMessage = $this->t('repair_saved');
+    }
+
+    public function canManageMouldRepairs(): bool
+    {
+        return $this->isAdmin() || Auth::user()?->role === Role::Coordinator;
+    }
+
+    public function canWorkOnMouldRepair(string $role): bool
+    {
+        return $this->isAdmin() || Auth::user()?->role?->value === $role;
+    }
+
+    public function canTestMouldRepair(): bool
+    {
+        return $this->isAdmin() || in_array(Auth::user()?->role, [Role::Coordinator, Role::Operator, Role::Maintenance, Role::QualityManager], true);
     }
 
     #[Computed]
@@ -1237,20 +1378,22 @@ new class extends Component
             $restoreCavities => ['active_cavities' => $problem['equipment']->cavity_count],
             default => [],
         };
-        $order->appendProtocolEntry($validated['protocolCurrentQuantity'], $type, $note, $meta);
-
-        match ($type) {
-            'machine_issue', 'other' => $order->machine?->update([
-                'status' => $stop ? 'stopped' : 'warning',
-                'problem_description' => $note,
-            ]),
-            'mould_issue' => $order->mould?->update([
-                'status' => $stop ? 'needs_repair' : 'warning',
-                'problem_description' => $note,
-            ] + ($changeCavities ? ['active_cavityes' => $this->protocolActiveCavities] : [])),
-            'resolved' => $this->resolveProblem($problem, $target),
-            default => null,
-        };
+        if ($type === 'mould_issue') {
+            DB::transaction(function () use ($order, $validated, $type, $note, $meta, $stop, $changeCavities): void {
+                $order->appendProtocolEntry($validated['protocolCurrentQuantity'], $type, $note, $meta);
+                $this->reportMouldIssue($order, $stop, $note, $changeCavities);
+            });
+        } else {
+            $order->appendProtocolEntry($validated['protocolCurrentQuantity'], $type, $note, $meta);
+            match ($type) {
+                'machine_issue', 'other' => $order->machine?->update([
+                    'status' => $stop ? 'stopped' : 'warning',
+                    'problem_description' => $note,
+                ]),
+                'resolved' => $this->resolveProblem($problem, $target),
+                default => null,
+            };
+        }
 
         unset($this->machines);
         $this->protocolEntryNote = '';
@@ -1260,6 +1403,26 @@ new class extends Component
         $this->protocolActiveCavities = null;
         $this->protocolCurrentQuantity = null;
         $this->flashMessage = $this->t('protocol_entry_saved');
+    }
+
+    private function reportMouldIssue(Order $order, bool $stop, string $note, bool $changeCavities): void
+    {
+        if (! $order->mould_id) {
+            return;
+        }
+
+        $mould = Mould::query()->lockForUpdate()->findOrFail($order->mould_id);
+        $hasOpenRepair = $mould->repairRequests()->where('status', '!=', 'completed')->exists();
+        $mould->update([
+            'status' => $hasOpenRepair ? 'under_repair' : ($stop ? 'needs_repair' : 'warning'),
+            'problem_description' => $note,
+            'repair_issue_version' => $mould->repair_issue_version + 1,
+        ] + ($changeCavities ? ['active_cavityes' => $this->protocolActiveCavities] : []));
+
+        if (in_array(Auth::user()->role, [Role::Operator, Role::Coordinator], true)) {
+            User::query()->where('role', Role::Coordinator->value)
+                ->each(fn (User $coordinator) => $coordinator->notify(new MouldRepairNotification($mould, 'mould_issue_reported', Auth::user()->name)));
+        }
     }
 
     public function markNotificationsRead(): void
@@ -1275,6 +1438,7 @@ new class extends Component
             'order' => $data['order_number'] ?? '',
             'actor' => $data['actor'] ?? '',
             'product' => $data['product'] ?? '',
+            'mould' => $data['mould'] ?? '',
         ];
 
         return match ($data['event'] ?? '') {
@@ -1287,6 +1451,10 @@ new class extends Component
             'special_requested' => $this->t('notification_special_requested', $replace),
             'special_approved' => $this->t('notification_special_approved', $replace),
             'special_rejected' => $this->t('notification_special_rejected', $replace),
+            'mould_issue_reported' => $this->t('notification_mould_issue_reported', $replace),
+            'repair_requested' => $this->t('notification_repair_requested', $replace),
+            'repair_awaiting_test' => $this->t('notification_repair_awaiting_test', $replace),
+            'repair_test_failed' => $this->t('notification_repair_test_failed', $replace),
             default => $this->t('notification_unknown'),
         };
     }
@@ -1563,6 +1731,9 @@ new class extends Component
         $faulty = ['warning', 'stopped', 'broken', 'inactive', 'maintenance', 'standby', 'needs_repair', 'under_repair'];
 
         foreach (['machine' => $order->machine, 'mould' => $order->mould] as $target => $equipment) {
+            if ($target === 'mould' && $equipment?->repairRequests()->where('status', '!=', 'completed')->exists()) {
+                continue;
+            }
             if ($equipment && in_array($equipment->status, $faulty, true)) {
                 $problems[$target] = [
                     'label' => $this->t('protocol_target_'.$target),
@@ -1933,10 +2104,7 @@ new class extends Component
                 @endforelse
             </section>
         @elseif ($activeTab === 'maintenance')
-            <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('maintenance') }}</h1>
-                <p class="mt-4 text-sm text-slate-500">{{ $this->t('no_maintenance_yet') }}</p>
-            </section>
+            @include('partials.mould-repairs')
         @elseif ($activeTab === 'help')
             <section class="space-y-4">
                 <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('help') }}</h1>
@@ -2093,6 +2261,28 @@ new class extends Component
     </main>
 
     @include('partials.footer')
+    @if ($mouldRepairLogId && ($logMould = $this->mouldRepairLog))
+        <div wire:key="mould-repair-log-{{ $logMould->id }}" wire:click.self="closeMouldRepairLog" class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4">
+            <section role="dialog" aria-modal="true" aria-labelledby="mould-repair-log-title" class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+                <div class="flex items-start justify-between gap-3 border-b-4 border-teal-600 px-5 py-4">
+                    <div>
+                        <h2 id="mould-repair-log-title" class="text-xl font-bold text-slate-900">{{ $this->t('repair_log') }}</h2>
+                        <p class="text-sm text-slate-500">{{ $logMould->name }} ({{ $logMould->number }})</p>
+                    </div>
+                    <button type="button" wire:click="closeMouldRepairLog" class="rounded-md px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label="{{ $this->t('close') }}">&times;</button>
+                </div>
+                <div class="space-y-3 overflow-y-auto p-5">
+                    @forelse ($logMould->repairRequests as $repair)
+                        <div wire:key="mould-log-request-{{ $repair->id }}" class="rounded-lg border border-slate-200 p-4">
+                            @include('partials.mould-repair-entry')
+                        </div>
+                    @empty
+                        <p class="text-sm text-slate-500">{{ $this->t('repair_history_empty') }}</p>
+                    @endforelse
+                </div>
+            </section>
+        </div>
+    @endif
     @if ($detailMachineId && ($detail = $this->detailMachine))
         <div wire:key="machine-detail-{{ $detail->id }}" wire:click.self="closeMachineDetail" class="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 sm:items-center sm:p-4">
             <div class="flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl sm:rounded-xl">

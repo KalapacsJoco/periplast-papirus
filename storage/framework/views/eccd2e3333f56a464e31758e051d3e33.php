@@ -1,0 +1,19 @@
+<div class="flex flex-wrap justify-between gap-2 text-sm">
+    <strong>#<?php echo e($repair->id); ?> · <?php echo e($this->t('repair_status_'.$repair->status)); ?></strong>
+    <span><?php echo e($this->t('repair_priority_short')); ?>: <?php echo e($repair->priority); ?> · <?php echo e($this->t('repair_role_'.$repair->assigned_role)); ?></span>
+</div>
+<p class="mt-1 text-xs text-slate-500"><?php echo e($this->t('requested_by')); ?>: <?php echo e($repair->requester?->name ?? '-'); ?> · <?php echo e($repair->created_at->timezone(config('app.display_timezone'))->format('Y-m-d H:i')); ?></p>
+<p class="mt-2 whitespace-pre-wrap text-sm"><?php echo e($repair->description); ?></p>
+
+<?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__currentLoopData = $repair->attempts; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $attempt): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
+    <div class="mt-3 rounded-md bg-slate-50 p-3 text-sm">
+        <p class="font-semibold"><?php echo e($this->t('repair_work_done')); ?> · <?php echo e($attempt->repairer?->name ?? '-'); ?> · <?php echo e($this->t('repair_role_'.$attempt->assigned_role)); ?></p>
+        <p class="mt-1 whitespace-pre-wrap"><?php echo e($attempt->description); ?></p>
+        <p class="mt-1 text-slate-600"><?php echo e($this->t('repair_duration')); ?>: <?php echo e(intdiv($attempt->duration_minutes, 60)); ?> <?php echo e($this->t('repair_hours')); ?> <?php echo e($attempt->duration_minutes % 60); ?> <?php echo e($this->t('repair_minutes')); ?> · <?php echo e($attempt->repaired_at->timezone(config('app.display_timezone'))->format('Y-m-d H:i')); ?></p>
+        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($attempt->tested_at): ?>
+            <p class="mt-2 font-semibold"><?php echo e($this->t($attempt->test_passed ? 'repair_test_passed' : 'repair_test_failed')); ?> · <?php echo e($attempt->tester?->name ?? '-'); ?> · <?php echo e($attempt->tested_at->timezone(config('app.display_timezone'))->format('Y-m-d H:i')); ?></p>
+            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($attempt->test_note): ?><p class="whitespace-pre-wrap"><?php echo e($attempt->test_note); ?></p><?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+        <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+    </div>
+<?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
+<?php /**PATH C:\Users\kalap\Herd\Papirus\resources\views/partials/mould-repair-entry.blade.php ENDPATH**/ ?>

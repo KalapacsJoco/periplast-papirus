@@ -89,7 +89,7 @@
                 </div>
                 <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
             </dl>
-            <button
+            <button type="button" wire:click.stop="openMouldRepairLog(<?php echo e($detailMould->id); ?>)"
                 class="mt-2 w-1/2 rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
                 <?php echo e($this->t('repair_log')); ?>
 

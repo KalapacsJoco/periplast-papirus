@@ -9,6 +9,8 @@ enum Role: string
     case Operator = 'operator';
     case QualityManager = 'quality_manager';
     case Coordinator = 'coordinator';
+    case Reparation = 'reparation';
+    case Maintenance = 'maintenance';
 
     public const PERMISSION_ALL = '*';
 
@@ -47,6 +49,7 @@ enum Role: string
             self::Operator => [self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHANGE_CAVITIES, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
             self::QualityManager => [self::CHECK_QUALITY, self::APPROVE_QUALITY, self::REQUEST_SPECIAL_PERMISSION, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING],
             self::Coordinator => [self::ASSIGN_ORDER, self::START_MACHINE, self::STOP_MACHINE, self::REPORT_EQUIPMENT_WARNING, self::CHANGE_CAVITIES, self::CHECK_QUALITY, self::CHECK_COLOR, self::ENTER_MEASURED_DATA],
+            self::Reparation, self::Maintenance => [],
         };
     }
 

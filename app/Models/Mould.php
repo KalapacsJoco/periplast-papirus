@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Validation\ValidationException;
 
 class Mould extends Model
 {
@@ -14,6 +15,12 @@ class Mould extends Model
     protected static function booted(): void
     {
         static::saving(function (Mould $mould): void {
+            if ($mould->exists && $mould->isDirty('status')
+                && in_array($mould->status, ['active', 'warning', 'standby'], true)
+                && $mould->repairRequests()->where('status', '!=', 'completed')->exists()) {
+                throw ValidationException::withMessages(['status' => __('dashboard.repair_open_blocks_status')]);
+            }
+
             if ($mould->cavity_count === null) {
                 return;
             }
@@ -56,6 +63,7 @@ class Mould extends Model
         'description',
         'status',
         'problem_description',
+        'repair_issue_version',
         'height_mm',
         'cooling_water_channel',
         'hot_channel',
@@ -89,6 +97,11 @@ class Mould extends Model
     public function maintenances(): HasMany
     {
         return $this->hasMany(Maintenance::class);
+    }
+
+    public function repairRequests(): HasMany
+    {
+        return $this->hasMany(MouldRepairRequest::class);
     }
 
     public function errors(): HasMany

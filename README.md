@@ -7,6 +7,16 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+## Szerszámjavítás
+
+A Karbantartás oldalon a koordinátor figyelmeztetett vagy hibás szerszámra javítást rendelhet el, 1–5 közötti sürgősséggel (1 a legsürgősebb), a szerszámjavító vagy a termelési karbantartó csapatnak. A programozók és a kijelölt csapat alkalmazáson belüli értesítést kapnak. Az adminisztrátor az adminfelület Felhasználók menüjében hozhat létre felhasználókat és rendelheti hozzájuk az új szerepköröket.
+
+A kijelölt csapat elindítja a munkát, majd rögzíti az elvégzett javítást és a ráfordított időt. A felszerelés utáni próba és minőségellenőrzés közös eredményét a koordinátor, operátor, karbantartó vagy minőségellenőr rögzíti. Sikertelen eredménynél a koordinátor visszaküldheti a kérelmet, akár másik csapatnak. Az összes kérelem és javítási próbálkozás a szerszám javítási naplójában marad.
+
+A gép részleteinél a felszerelt szerszám „Javítási napló” gombjával megtekinthetők az adott szerszám korábbi javításai.
+
+A javítás elrendelése leállítja a szerszámhoz kapcsolódó termelést. A szerszám csak akkor lesz újra aktív, ha minden nyitott javítás sikeres ellenőrzéssel lezárult, és azóta nem jelentettek újabb, még kérelmezésre váró hibát. A rendszer a meglévő termelési feltételek szerint oldja fel az automatikus leállítást. A használathoz futtatni kell az új adatbázis-migrációt a szokásos telepítési folyamat részeként.
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
