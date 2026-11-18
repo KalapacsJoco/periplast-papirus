@@ -48,6 +48,16 @@ new class extends Component
     #[Locked]
     public ?int $mouldRepairLogId = null;
 
+    public string $mouldLogTab = 'repairs';
+
+    #[Locked]
+    public ?int $machineLogId = null;
+
+    public string $machineLogTab = 'repairs';
+
+    /** @var array<int, string> */
+    public array $mouldNotes = [];
+
     public ?int $orderId = null;
 
     public ?int $qualityOrderId = null;
@@ -137,6 +147,9 @@ new class extends Component
     public array $repairMinutes = [];
 
     public array $repairTestNotes = [];
+
+    /** @var array<int, bool> */
+    public array $repairAllCavitiesWork = [];
 
     public array $repairReopenRoles = [];
 
@@ -368,19 +381,12 @@ new class extends Component
             ->get();
     }
 
-    #[Computed]
-    public function repairMoulds()
-    {
-        return Mould::query()
-            ->where(fn ($query) => $query->whereIn('status', ['warning', 'needs_repair', 'under_repair'])->orWhereHas('repairRequests'))
-            ->with($this->repairHistoryRelations())
-            ->orderBy('name')
-            ->get();
-    }
-
     private function repairHistoryRelations(): array
     {
-        return ['repairRequests' => fn ($query) => $query->with(['requester', 'attempts.repairer', 'attempts.tester'])->orderBy('priority')->orderByDesc('id')];
+        return [
+            'repairRequests' => fn ($query) => $query->with(['requester', 'attempts.repairer', 'attempts.tester'])->orderBy('priority')->orderByDesc('id'),
+            'notes' => fn ($query) => $query->with('author')->latest('id'),
+        ];
     }
 
     #[Computed]
@@ -391,10 +397,17 @@ new class extends Component
             : Mould::query()->with($this->repairHistoryRelations())->find($this->mouldRepairLogId);
     }
 
+    #[Computed]
+    public function machineLog(): ?Machine
+    {
+        return $this->machineLogId === null ? null : Machine::query()->find($this->machineLogId);
+    }
+
     public function openMouldRepairLog(int $mouldId): void
     {
         $this->ensureAuthenticated();
         $this->mouldRepairLogId = Mould::query()->findOrFail($mouldId)->id;
+        $this->mouldLogTab = 'repairs';
         unset($this->mouldRepairLog);
     }
 
@@ -402,6 +415,49 @@ new class extends Component
     {
         $this->mouldRepairLogId = null;
         unset($this->mouldRepairLog);
+    }
+
+    public function selectMouldLogTab(string $tab): void
+    {
+        $this->mouldLogTab = in_array($tab, ['repairs', 'warnings', 'maintenance', 'notes'], true) ? $tab : 'repairs';
+    }
+
+    public function openMachineLog(int $machineId): void
+    {
+        $this->ensureAuthenticated();
+        $this->machineLogId = Machine::query()->findOrFail($machineId)->id;
+        $this->machineLogTab = 'repairs';
+    }
+
+    public function closeMachineLog(): void
+    {
+        $this->machineLogId = null;
+    }
+
+    public function selectMachineLogTab(string $tab): void
+    {
+        $this->machineLogTab = in_array($tab, ['repairs', 'warnings', 'maintenance', 'notes'], true) ? $tab : 'repairs';
+    }
+
+    public function dismissMouldWarning(int $mouldId): void
+    {
+        $this->ensureAuthenticated();
+        app(MouldRepairWorkflow::class)->dismissWarning($mouldId, Auth::user());
+        unset($this->mouldRepairLog, $this->machines);
+        $this->flashMessage = $this->t('repair_saved');
+    }
+
+    public function addMouldNote(int $mouldId): void
+    {
+        $this->ensureAuthenticated();
+        $validated = $this->validate([
+            "mouldNotes.$mouldId" => ['required', 'string', 'max:2000'],
+        ]);
+        Mould::query()->findOrFail($mouldId)->notes()->create([
+            'user_id' => Auth::id(),
+            'body' => $validated['mouldNotes'][$mouldId],
+        ]);
+        unset($this->mouldNotes[$mouldId], $this->mouldRepairLog);
     }
 
     public function createMouldRepair(int $mouldId): void
@@ -419,7 +475,7 @@ new class extends Component
             (int) $validated['repairPriorities'][$mouldId],
             Role::from($validated['repairRoles'][$mouldId]),
         );
-        unset($this->repairDescriptions[$mouldId], $this->repairPriorities[$mouldId], $this->repairRoles[$mouldId], $this->repairMoulds, $this->machines);
+        unset($this->repairDescriptions[$mouldId], $this->repairPriorities[$mouldId], $this->repairRoles[$mouldId], $this->mouldRepairLog, $this->machines);
         $this->flashMessage = $this->t('repair_saved');
     }
 
@@ -427,7 +483,7 @@ new class extends Component
     {
         $this->ensureAuthenticated();
         app(MouldRepairWorkflow::class)->setWorkStatus($requestId, Auth::user(), $status);
-        unset($this->repairMoulds);
+        unset($this->mouldRepairLog);
         $this->flashMessage = $this->t('repair_saved');
     }
 
@@ -446,7 +502,7 @@ new class extends Component
             return;
         }
         app(MouldRepairWorkflow::class)->finish($requestId, Auth::user(), $validated['repairWorkDescriptions'][$requestId], $minutes);
-        unset($this->repairWorkDescriptions[$requestId], $this->repairHours[$requestId], $this->repairMinutes[$requestId], $this->repairMoulds);
+        unset($this->repairWorkDescriptions[$requestId], $this->repairHours[$requestId], $this->repairMinutes[$requestId], $this->mouldRepairLog);
         $this->flashMessage = $this->t('repair_saved');
     }
 
@@ -456,8 +512,8 @@ new class extends Component
         $validated = $this->validate([
             "repairTestNotes.$requestId" => [$passed ? 'nullable' : 'required', 'string', 'max:2000'],
         ]);
-        app(MouldRepairWorkflow::class)->test($requestId, Auth::user(), $passed, $validated['repairTestNotes'][$requestId] ?? null);
-        unset($this->repairTestNotes[$requestId], $this->repairMoulds, $this->machines);
+        app(MouldRepairWorkflow::class)->test($requestId, Auth::user(), $passed, $validated['repairTestNotes'][$requestId] ?? null, (bool) ($this->repairAllCavitiesWork[$requestId] ?? false));
+        unset($this->repairTestNotes[$requestId], $this->repairAllCavitiesWork[$requestId], $this->mouldRepairLog, $this->machines);
         $this->flashMessage = $this->t('repair_saved');
     }
 
@@ -468,7 +524,7 @@ new class extends Component
             "repairReopenRoles.$requestId" => ['required', Rule::in([Role::Reparation->value, Role::Maintenance->value])],
         ]);
         app(MouldRepairWorkflow::class)->reopen($requestId, Auth::user(), Role::from($validated['repairReopenRoles'][$requestId]));
-        unset($this->repairReopenRoles[$requestId], $this->repairMoulds);
+        unset($this->repairReopenRoles[$requestId], $this->mouldRepairLog);
         $this->flashMessage = $this->t('repair_saved');
     }
 
@@ -2104,7 +2160,8 @@ new class extends Component
                 @endforelse
             </section>
         @elseif ($activeTab === 'maintenance')
-            @include('partials.mould-repairs')
+            <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('maintenance') }}</h1>
+            <p class="mt-3 rounded-xl bg-white p-6 text-sm text-slate-500">{{ $this->t('log_placeholder') }}</p>
         @elseif ($activeTab === 'help')
             <section class="space-y-4">
                 <h1 class="text-2xl font-bold text-slate-900">{{ $this->t('help') }}</h1>
@@ -2263,22 +2320,42 @@ new class extends Component
     @include('partials.footer')
     @if ($mouldRepairLogId && ($logMould = $this->mouldRepairLog))
         <div wire:key="mould-repair-log-{{ $logMould->id }}" wire:click.self="closeMouldRepairLog" class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4">
-            <section role="dialog" aria-modal="true" aria-labelledby="mould-repair-log-title" class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+            <section wire:poll.15s role="dialog" aria-modal="true" aria-labelledby="mould-repair-log-title" class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
                 <div class="flex items-start justify-between gap-3 border-b-4 border-teal-600 px-5 py-4">
                     <div>
-                        <h2 id="mould-repair-log-title" class="text-xl font-bold text-slate-900">{{ $this->t('repair_log') }}</h2>
+                        <h2 id="mould-repair-log-title" class="text-xl font-bold text-slate-900">{{ $this->t('mould_log') }}</h2>
                         <p class="text-sm text-slate-500">{{ $logMould->name }} ({{ $logMould->number }})</p>
                     </div>
                     <button type="button" wire:click="closeMouldRepairLog" class="rounded-md px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label="{{ $this->t('close') }}">&times;</button>
                 </div>
-                <div class="space-y-3 overflow-y-auto p-5">
-                    @forelse ($logMould->repairRequests as $repair)
-                        <div wire:key="mould-log-request-{{ $repair->id }}" class="rounded-lg border border-slate-200 p-4">
-                            @include('partials.mould-repair-entry')
-                        </div>
-                    @empty
-                        <p class="text-sm text-slate-500">{{ $this->t('repair_history_empty') }}</p>
-                    @endforelse
+                @include('partials.log-tabs', ['selectAction' => 'selectMouldLogTab', 'currentTab' => $mouldLogTab])
+                <div class="overflow-y-auto p-5">
+                    @if ($mouldLogTab === 'warnings')
+                        @include('partials.mould-log-warnings', ['mould' => $logMould])
+                    @elseif ($mouldLogTab === 'maintenance')
+                        <p class="text-sm text-slate-500">{{ $this->t('log_placeholder') }}</p>
+                    @elseif ($mouldLogTab === 'notes')
+                        @include('partials.mould-log-notes', ['mould' => $logMould])
+                    @else
+                        @include('partials.mould-log-repairs', ['mould' => $logMould])
+                    @endif
+                </div>
+            </section>
+        </div>
+    @endif
+    @if ($machineLogId && ($logMachine = $this->machineLog))
+        <div wire:key="machine-log-{{ $logMachine->id }}" wire:click.self="closeMachineLog" class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4">
+            <section role="dialog" aria-modal="true" aria-labelledby="machine-log-title" class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+                <div class="flex items-start justify-between gap-3 border-b-4 border-teal-600 px-5 py-4">
+                    <div>
+                        <h2 id="machine-log-title" class="text-xl font-bold text-slate-900">{{ $this->t('machine_log') }}</h2>
+                        <p class="text-sm text-slate-500">{{ $logMachine->name }}</p>
+                    </div>
+                    <button type="button" wire:click="closeMachineLog" class="rounded-md px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label="{{ $this->t('close') }}">&times;</button>
+                </div>
+                @include('partials.log-tabs', ['selectAction' => 'selectMachineLogTab', 'currentTab' => $machineLogTab])
+                <div class="overflow-y-auto p-5">
+                    <p class="text-sm text-slate-500">{{ $this->t('log_placeholder') }}</p>
                 </div>
             </section>
         </div>

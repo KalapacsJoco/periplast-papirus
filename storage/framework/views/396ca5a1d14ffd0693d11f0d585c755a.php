@@ -360,7 +360,8 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
                 <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
             </section>
         <?php elseif($activeTab === 'maintenance'): ?>
-            <?php echo $__env->make('partials.mould-repairs', array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
+            <h1 class="text-2xl font-bold text-slate-900"><?php echo e($this->t('maintenance')); ?></h1>
+            <p class="mt-3 rounded-xl bg-white p-6 text-sm text-slate-500"><?php echo e($this->t('log_placeholder')); ?></p>
         <?php elseif($activeTab === 'help'): ?>
             <section class="space-y-4">
                 <h1 class="text-2xl font-bold text-slate-900"><?php echo e($this->t('help')); ?></h1>
@@ -521,22 +522,42 @@ unset($__errorArgs, $__bag); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendB
     <?php echo $__env->make('partials.footer', array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($mouldRepairLogId && ($logMould = $this->mouldRepairLog)): ?>
         <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'mould-repair-log-'.e($logMould->id).''; ?>wire:key="mould-repair-log-<?php echo e($logMould->id); ?>" wire:click.self="closeMouldRepairLog" class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4">
-            <section role="dialog" aria-modal="true" aria-labelledby="mould-repair-log-title" class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+            <section wire:poll.15s role="dialog" aria-modal="true" aria-labelledby="mould-repair-log-title" class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
                 <div class="flex items-start justify-between gap-3 border-b-4 border-teal-600 px-5 py-4">
                     <div>
-                        <h2 id="mould-repair-log-title" class="text-xl font-bold text-slate-900"><?php echo e($this->t('repair_log')); ?></h2>
+                        <h2 id="mould-repair-log-title" class="text-xl font-bold text-slate-900"><?php echo e($this->t('mould_log')); ?></h2>
                         <p class="text-sm text-slate-500"><?php echo e($logMould->name); ?> (<?php echo e($logMould->number); ?>)</p>
                     </div>
                     <button type="button" wire:click="closeMouldRepairLog" class="rounded-md px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label="<?php echo e($this->t('close')); ?>">&times;</button>
                 </div>
-                <div class="space-y-3 overflow-y-auto p-5">
-                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::openLoop(); ?><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $logMould->repairRequests; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $repair): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::startLoopIteration(); ?><?php endif; ?>
-                        <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'mould-log-request-'.e($repair->id).''; ?>wire:key="mould-log-request-<?php echo e($repair->id); ?>" class="rounded-lg border border-slate-200 p-4">
-                            <?php echo $__env->make('partials.mould-repair-entry', array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
-                        </div>
-                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::endLoop(); ?><?php endif; ?><?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::closeLoop(); ?><?php endif; ?>
-                        <p class="text-sm text-slate-500"><?php echo e($this->t('repair_history_empty')); ?></p>
+                <?php echo $__env->make('partials.log-tabs', ['selectAction' => 'selectMouldLogTab', 'currentTab' => $mouldLogTab], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
+                <div class="overflow-y-auto p-5">
+                    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($mouldLogTab === 'warnings'): ?>
+                        <?php echo $__env->make('partials.mould-log-warnings', ['mould' => $logMould], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
+                    <?php elseif($mouldLogTab === 'maintenance'): ?>
+                        <p class="text-sm text-slate-500"><?php echo e($this->t('log_placeholder')); ?></p>
+                    <?php elseif($mouldLogTab === 'notes'): ?>
+                        <?php echo $__env->make('partials.mould-log-notes', ['mould' => $logMould], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
+                    <?php else: ?>
+                        <?php echo $__env->make('partials.mould-log-repairs', ['mould' => $logMould], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
                     <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+                </div>
+            </section>
+        </div>
+    <?php endif; ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
+    <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if($machineLogId && ($logMachine = $this->machineLog)): ?>
+        <div <?php \Livewire\Features\SupportCompiledWireKeys\SupportCompiledWireKeys::$currentLoop['key'] = 'machine-log-'.e($logMachine->id).''; ?>wire:key="machine-log-<?php echo e($logMachine->id); ?>" wire:click.self="closeMachineLog" class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4">
+            <section role="dialog" aria-modal="true" aria-labelledby="machine-log-title" class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+                <div class="flex items-start justify-between gap-3 border-b-4 border-teal-600 px-5 py-4">
+                    <div>
+                        <h2 id="machine-log-title" class="text-xl font-bold text-slate-900"><?php echo e($this->t('machine_log')); ?></h2>
+                        <p class="text-sm text-slate-500"><?php echo e($logMachine->name); ?></p>
+                    </div>
+                    <button type="button" wire:click="closeMachineLog" class="rounded-md px-3 py-1 text-2xl leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label="<?php echo e($this->t('close')); ?>">&times;</button>
+                </div>
+                <?php echo $__env->make('partials.log-tabs', ['selectAction' => 'selectMachineLogTab', 'currentTab' => $machineLogTab], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
+                <div class="overflow-y-auto p-5">
+                    <p class="text-sm text-slate-500"><?php echo e($this->t('log_placeholder')); ?></p>
                 </div>
             </section>
         </div>

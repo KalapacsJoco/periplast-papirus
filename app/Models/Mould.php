@@ -104,6 +104,11 @@ class Mould extends Model
         return $this->hasMany(MouldRepairRequest::class);
     }
 
+    public function notes(): HasMany
+    {
+        return $this->hasMany(MouldNote::class);
+    }
+
     public function errors(): HasMany
     {
         return $this->hasMany(Error::class);

@@ -8,7 +8,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class MouldRepairRequest extends Model
 {
-    protected $fillable = ['mould_id', 'requested_by', 'description', 'priority', 'assigned_role', 'status', 'issue_version'];
+    protected $fillable = ['mould_id', 'requested_by', 'description', 'priority', 'assigned_role', 'status', 'issue_version', 'cavities_reduced'];
+
+    protected function casts(): array
+    {
+        return ['cavities_reduced' => 'boolean'];
+    }
 
     public function mould(): BelongsTo
     {

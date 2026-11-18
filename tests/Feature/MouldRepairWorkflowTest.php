@@ -61,7 +61,29 @@ class MouldRepairWorkflowTest extends TestCase
         $this->assertSame('active', $mould->fresh()->status);
         $this->assertTrue($request->attempts()->firstOrFail()->test_passed);
         Livewire::actingAs($operator)->test('production-dashboard')
-            ->call('selectTab', 'maintenance')->assertSee('Insert repaired');
+            ->call('openMouldRepairLog', $mould->id)->assertSee('Insert repaired');
+    }
+
+    public function test_warning_can_be_dismissed_only_by_coordinator_and_notes_are_stored(): void
+    {
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $operator = User::factory()->create(['role' => Role::Operator]);
+        $mould = $this->mould('warning');
+
+        Livewire::actingAs($operator)->test('production-dashboard')
+            ->call('dismissMouldWarning', $mould->id)->assertForbidden();
+        Livewire::actingAs($coordinator)->test('production-dashboard')
+            ->call('openMouldRepairLog', $mould->id)
+            ->call('selectMouldLogTab', 'warnings')->assertSee('Nem javítjuk')
+            ->call('dismissMouldWarning', $mould->id)->assertHasNoErrors();
+        $this->assertSame('active', $mould->fresh()->status);
+
+        Livewire::actingAs($operator)->test('production-dashboard')
+            ->call('openMouldRepairLog', $mould->id)
+            ->set("mouldNotes.$mould->id", 'Checked on site')
+            ->call('addMouldNote', $mould->id)->assertHasNoErrors()
+            ->call('selectMouldLogTab', 'notes')
+            ->assertSee('Checked on site')->assertSee('Figyelmeztetés elvetve');
     }
 
     public function test_failed_test_requires_a_coordinator_and_preserves_every_attempt(): void
@@ -275,6 +297,32 @@ class MouldRepairWorkflowTest extends TestCase
 
         $this->expectException(ModelNotFoundException::class);
         $dashboard->call('openMouldRepairLog', 999999);
+    }
+
+    public function test_passing_test_restores_cavities_only_when_tester_confirms_and_repair_started_reduced(): void
+    {
+        Notification::fake();
+        $coordinator = User::factory()->create(['role' => Role::Coordinator]);
+        $repairer = User::factory()->create(['role' => Role::Reparation]);
+        $mould = Mould::create(['name' => 'Mould', 'number' => 'TEST', 'cavity_count' => 4, 'active_cavityes' => 2, 'status' => 'needs_repair', 'problem_description' => 'Problem']);
+        $this->createRequest($coordinator, $mould, 'reparation');
+        $request = $mould->repairRequests()->firstOrFail();
+        $this->assertTrue($request->cavities_reduced);
+        $this->finish($repairer, $request, 'Fixed');
+
+        Livewire::actingAs($coordinator)->test('production-dashboard')
+            ->call('openMouldRepairLog', $mould->id)->assertSee('Minden fészek működik')
+            ->set("repairAllCavitiesWork.$request->id", true)
+            ->call('testMouldRepair', $request->id, true)->assertHasNoErrors();
+        $this->assertSame(4, $mould->fresh()->active_cavityes);
+
+        $second = Mould::create(['name' => 'Mould2', 'number' => 'T2', 'cavity_count' => 4, 'active_cavityes' => 2, 'status' => 'needs_repair', 'problem_description' => 'Problem']);
+        $this->createRequest($coordinator, $second, 'reparation');
+        $secondRequest = $second->repairRequests()->firstOrFail();
+        $this->finish($repairer, $secondRequest, 'Fixed');
+        Livewire::actingAs($coordinator)->test('production-dashboard')
+            ->call('testMouldRepair', $secondRequest->id, true)->assertHasNoErrors();
+        $this->assertSame(2, $second->fresh()->active_cavityes);
     }
 
     private function mould(string $status): Mould

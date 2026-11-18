@@ -26,9 +26,25 @@ class MouldRepairWorkflow
                 'assigned_role' => $role->value,
                 'status' => 'waiting',
                 'issue_version' => $mould->repair_issue_version,
+                'cavities_reduced' => $mould->hasClosedCavities(),
             ]);
             $mould->update(['status' => 'under_repair']);
             $this->notify($mould, 'repair_requested', $actor, [Role::Programmer, $role]);
+        });
+    }
+
+    public function dismissWarning(int $mouldId, User $actor): void
+    {
+        $this->requireRole($actor, [Role::Coordinator]);
+
+        DB::transaction(function () use ($mouldId, $actor): void {
+            $mould = Mould::query()->lockForUpdate()->findOrFail($mouldId);
+            abort_unless($mould->status === 'warning', 422);
+            $mould->notes()->create([
+                'user_id' => $actor->id,
+                'body' => __('dashboard.warning_dismissed_note', ['problem' => $mould->problem_description ?? '-']),
+            ]);
+            $mould->update(['status' => 'active', 'problem_description' => null]);
         });
     }
 
@@ -59,10 +75,10 @@ class MouldRepairWorkflow
         });
     }
 
-    public function test(int $requestId, User $actor, bool $passed, ?string $note): void
+    public function test(int $requestId, User $actor, bool $passed, ?string $note, bool $allCavitiesWork = false): void
     {
         $this->requireRole($actor, [Role::Coordinator, Role::Operator, Role::Maintenance, Role::QualityManager]);
-        $this->withLockedRequest($requestId, function (MouldRepairRequest $request, Mould $mould) use ($actor, $passed, $note): void {
+        $this->withLockedRequest($requestId, function (MouldRepairRequest $request, Mould $mould) use ($actor, $passed, $note, $allCavitiesWork): void {
             abort_unless($request->status === 'awaiting_test', 422);
             $attempt = $request->attempts()->latest('id')->firstOrFail();
             $attempt->update(['test_passed' => $passed, 'test_note' => $note, 'tested_by' => $actor->id, 'tested_at' => now()]);
@@ -72,6 +88,10 @@ class MouldRepairWorkflow
                 $this->notify($mould, 'repair_test_failed', $actor, [Role::Coordinator]);
 
                 return;
+            }
+
+            if ($allCavitiesWork && $request->cavities_reduced && $mould->hasClosedCavities()) {
+                $mould->update(['active_cavityes' => $mould->cavity_count]);
             }
 
             $requests = $mould->repairRequests();

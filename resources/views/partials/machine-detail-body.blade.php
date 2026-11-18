@@ -34,9 +34,9 @@
                     <dd class="font-semibold">{{ $detail->closing ?? '-' }} mm</dd>
                 </div>
             </dl>
-            <button
+            <button type="button" wire:click.stop="openMachineLog({{ $detail->id }})"
                 class="rounded-md border w-1/2 border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
-                {{ $this->t('repair_log') }}
+                {{ $this->t('machine_log') }}
             </button>
             @if ($detail->problem_description)
             <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{
@@ -97,10 +97,9 @@
             </dl>
             <button type="button" wire:click.stop="openMouldRepairLog({{ $detailMould->id }})"
                 class="mt-2 w-1/2 rounded-md border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-teal-800 hover:bg-teal-100">
-                {{ $this->t('repair_log') }}
+                {{ $this->t('mould_log') }}
             </button>
-            @if ($detailMould->problem_description)
-            <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{
+            @if ($detailMould->problem_description)            <p class="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700"><strong>{{ $this->t('problem') }}:</strong> {{
                 $detailMould->problem_description }}</p>
             @endif
             @else
